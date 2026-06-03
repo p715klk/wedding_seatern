@@ -2,13 +2,13 @@
 <html lang="zh-Hant-HK">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>婚宴即時同步帶位系統 (Eaton HK)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
 </head>
-<body class="bg-gray-100 text-gray-800 font-sans pb-12">
+<body class="bg-gray-100 text-gray-800 font-sans pb-12 select-none">
 
     <header class="bg-red-700 text-white p-4 shadow-md sticky top-0 z-50 text-center">
         <h1 class="text-xl font-bold tracking-wider">Wedding Guest Manager</h1>
@@ -17,7 +17,7 @@
 
     <div class="max-w-xl mx-auto mt-4 px-4">
         <div class="relative">
-            <input type="text" id="search-input" oninput="handleSearch()" placeholder="🔍 輸入姓名 / 分類 / 子分類 (如: 男方, 女方, LK, BDO, 親戚)..." 
+            <input type="text" id="search-input" oninput="handleSearch()" placeholder="🔍 輸入姓名 / 分類 / 子分類 (如: 男方, LK)..." 
                 class="w-full p-3 pl-10 pr-10 rounded-xl border-2 border-red-200 shadow-sm focus:outline-none focus:border-red-500 text-base">
             <button id="clear-search" onclick="clearSearch()" class="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 hidden font-bold">&times;</button>
         </div>
@@ -98,18 +98,24 @@
             Object.keys(dbData).forEach(table => {
                 const guests = dbData[table] || [];
                 let arrivedCount = 0;
+                let activeCount = 0;
 
                 guests.forEach(guest => {
-                    if (statusState[`${table}_${guest.name}`]?.arrived) arrivedCount++;
+                    const state = statusState[`${table}_${guest.name}`] || { arrived: '未到' };
+                    // 📌 只要唔係取消，就計算入去計劃出席人數
+                    if (state.arrived !== '取消') {
+                        activeCount++;
+                        if (state.arrived === '已到') arrivedCount++;
+                    }
                 });
                 
-                const percent = guests.length ? Math.round((arrivedCount / guests.length) * 100) : 0;
+                const percent = activeCount ? Math.round((arrivedCount / activeCount) * 100) : 0;
                 const circle = document.getElementById(`table-circle-${table}`);
                 const card = document.getElementById(`table-card-${table}`);
                 
                 if (circle && card) {
                     circle.innerText = `${percent}%`;
-                    if (percent === 100) {
+                    if (percent === 100 && activeCount > 0) {
                         circle.className = "w-12 h-12 rounded-full border-4 border-green-500 bg-green-50 flex items-center justify-center text-xs font-black text-green-600";
                         card.className = card.className.replace(/border-gray-200|border-orange-300/, 'border-green-500');
                     } else if (percent > 0) {
@@ -139,47 +145,73 @@
             container.innerHTML = '';
             
             const guests = dbData[tableNum] || [];
-            document.getElementById('modal-title').innerText = `第 ${tableNum} 桌賓客名單 (${guests.length} 位)`;
+            
+            // 📌 計算實質佔位人數 (總人數 減去 選擇咗取消嘅人)
+            let currentSeatOccupied = 0;
+            guests.forEach(guest => {
+                const state = statusState[`${tableNum}_${guest.name}`] || { arrived: '未到' };
+                if (state.arrived !== '取消') {
+                    currentSeatOccupied++;
+                }
+            });
+
+            document.getElementById('modal-title').innerText = `第 ${tableNum} 桌賓客名單 (現坐 ${currentSeatOccupied}/12 位)`;
 
             guests.forEach((guest, index) => {
                 const name = guest.name;
                 const side = guest.side || "";
                 const group = guest.group || "";
                 const key = `${tableNum}_${name}`;
-                const state = statusState[key] || { arrived: false, gift: '未交' };
+                
+                // 📌 兼容舊數據，如果原本係 boolean 轉返做字串
+                let rawArrived = statusState[key]?.arrived;
+                let currentArrivedStatus = '未到';
+                if (rawArrived === true || rawArrived === '已到') currentArrivedStatus = '已到';
+                else if (rawArrived === '取消') currentArrivedStatus = '取消';
+                
+                const currentGift = statusState[key]?.gift || '未交';
                 const isJwsRow = name.includes("眷屬");
 
                 const row = document.createElement('div');
-                row.className = `p-2.5 rounded-lg border flex justify-between items-center gap-2 shadow-sm ${isJwsRow ? 'bg-gray-100/70 border-dashed border-gray-300' : 'bg-gray-50 border-gray-200'}`;
+                // 如果係取消狀態，成行字變淡加刪除線
+                row.className = `p-2.5 rounded-lg border flex justify-between items-center gap-2 shadow-sm ${currentArrivedStatus === '取消' ? 'bg-red-50/50 opacity-50 line-through border-red-200' : isJwsRow ? 'bg-gray-100/70 border-dashed border-gray-300' : 'bg-gray-50 border-gray-200'}`;
+                
                 row.innerHTML = `
                     <div class="flex flex-col flex-1 text-left">
-                        <span class="font-medium text-gray-800 ${isJwsRow ? 'text-gray-500 text-sm pl-3 italic' : ''}">${name}</span>
-                        <div class="flex gap-1 mt-0.5 text-[10px]">
-                            <span class="px-1 rounded bg-blue-55 bg-blue-50 text-blue-600 font-medium">${side}</span>
-                            <span class="px-1 rounded bg-purple-55 bg-purple-50 text-purple-600 font-medium">${group}</span>
+                        <span class="font-bold text-gray-800 ${isJwsRow ? 'text-gray-500 text-sm pl-3 italic' : ''}">${name}</span>
+                        <div class="flex gap-1 mt-1">
+                            <span class="px-2 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-700">${side}</span>
+                            <span class="px-2 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-700">${group}</span>
                         </div>
                     </div>
-                    <div class="flex gap-1">
-                        <button onclick="toggleArrived('${tableNum}', '${name}', ${state.arrived})" class="px-2.5 py-1.5 text-xs font-bold rounded ${state.arrived ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-600'}">
-                            ${state.arrived ? '🟢 已到' : '⚪ 未到'}
+                    <div class="flex gap-1 items-center">
+                        <button onclick="cycleArrivedStatus('${tableNum}', '${name}', '${currentArrivedStatus}')" class="px-2.5 py-2 text-xs font-black rounded border shadow-sm ${getArrivedStyle(currentArrivedStatus)}">
+                            ${getArrivedLabel(currentArrivedStatus)}
                         </button>
-                        <button onclick="cycleGift('${tableNum}', '${name}', '${state.gift}')" class="px-2.5 py-1.5 text-xs font-bold rounded ${state.gift !== '未交' ? 'bg-red-600 text-white' : 'bg-gray-200 text-gray-600'}">
-                            ${getGiftLabel(state.gift)}
+                        <button onclick="cycleGift('${tableNum}', '${name}', '${currentGift}')" class="px-2.5 py-2 text-xs font-black rounded border shadow-sm ${currentGift !== '未交' ? 'bg-red-600 text-white border-red-700' : 'bg-gray-200 text-gray-600 border-gray-300'}">
+                            ${getGiftLabel(currentGift)}
                         </button>
                     </div>
                 `;
                 container.appendChild(row);
             });
 
-            // 提供新加座位按鈕
-            const addRow = document.createElement('div');
-            addRow.className = "pt-2 text-center";
-            addRow.innerHTML = `
-                <button onclick="addNewGuestInline('${tableNum}', ${guests.length})" class="w-full py-2 text-xs font-bold rounded-lg border-2 border-dashed border-red-300 text-red-700 bg-red-50 hover:bg-red-100 transition shadow-sm">
-                    + 填入此桌新賓客 / 臨時帶伴
-                </button>
-            `;
-            container.appendChild(addRow);
+            // 📌 第1點修改：防呆機制。如果未滿 12 人就顯示加人掣；滿 12 人就自動隱藏，確保唔會超載
+            if (currentSeatOccupied < 12) {
+                const addRow = document.createElement('div');
+                addRow.className = "pt-2 text-center";
+                addRow.innerHTML = `
+                    <button onclick="addNewGuestInline('${tableNum}', ${guests.length})" class="w-full py-2.5 text-sm font-bold rounded-lg border-2 border-dashed border-red-300 text-red-700 bg-red-50 hover:bg-red-100 transition shadow-sm">
+                        + 填入此桌新賓客 / 臨時帶伴 (餘下 ${12 - currentSeatOccupied} 空位)
+                    </button>
+                `;
+                container.appendChild(addRow);
+            } else {
+                const fullRow = document.createElement('div');
+                fullRow.className = "pt-2 text-center text-xs font-bold text-gray-400 bg-gray-200/50 py-2 rounded-lg border border-dashed border-gray-300";
+                fullRow.innerText = "🔒 此圍已滿 12 人 (如需加人，請先將其他賓客設為「取消」釋放座位)";
+                container.appendChild(fullRow);
+            }
         }
 
         function addNewGuestInline(tableNum, currentLength) {
@@ -195,8 +227,23 @@
             });
         }
 
-        function toggleArrived(table, name, currentStatus) {
-            database.ref(`guest_status/${table}_${name}/arrived`).set(!currentStatus);
+        // 三段式簽到切換：未到 -> 已到 -> 取消 -> 未到
+        function cycleArrivedStatus(table, name, currentStatus) {
+            const statusFlow = { '未到': '已到', '已到': '取消', '取消': '未到' };
+            const nextStatus = statusFlow[currentStatus] || '未到';
+            database.ref(`guest_status/${table}_${name}/arrived`).set(nextStatus);
+        }
+
+        function getArrivedLabel(status) {
+            if (status === '已到') return "🟢 已到";
+            if (status === '取消') return "❌ 取消";
+            return "⚪ 未到";
+        }
+
+        function getArrivedStyle(status) {
+            if (status === '已到') return "bg-green-600 text-white border-green-700";
+            if (status === '取消') return "bg-red-100 text-red-700 border-red-300";
+            return "bg-gray-200 text-gray-700 border-gray-300";
         }
 
         function handleSearch() {
@@ -229,25 +276,31 @@
                         
                         hasResults = true;
                         const key = `${tableNum}_${name}`;
-                        const state = statusState[key] || { arrived: false, gift: '未交' };
+                        
+                        let rawArrived = statusState[key]?.arrived;
+                        let currentArrivedStatus = '未到';
+                        if (rawArrived === true || rawArrived === '已到') currentArrivedStatus = '已到';
+                        else if (rawArrived === '取消') currentArrivedStatus = '取消';
+                        
+                        const currentGift = statusState[key]?.gift || '未交';
                         
                         const row = document.createElement('div');
-                        row.className = "p-2 bg-red-50 hover:bg-red-100 rounded-lg flex justify-between items-center gap-2 border border-red-100 transition";
+                        row.className = "p-2 bg-red-50 hover:bg-red-100 rounded-lg flex justify-between items-center gap-2 border border-red-100 transition shadow-sm";
                         row.innerHTML = `
                             <div class="flex flex-col text-left cursor-pointer flex-1" onclick="openModalAndHighlight('${tableNum}')">
                                 <span class="font-bold text-gray-800">${name}</span>
-                                <span class="text-xs text-red-700 font-medium">
+                                <span class="text-xs text-red-700 font-medium mt-1">
                                     第 ${tableNum} 桌 • 
-                                    <span class="px-1 rounded bg-blue-100/60 text-blue-700 text-[10px]">${side}</span>
-                                    <span class="px-1 rounded bg-purple-100/60 text-purple-700 text-[10px]">${group}</span>
+                                    <span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-xs font-bold">${side}</span>
+                                    <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-xs font-bold">${group}</span>
                                 </span>
                             </div>
-                            <div class="flex gap-1">
-                                <button onclick="toggleArrived('${tableNum}', '${name}', ${state.arrived})" class="px-2 py-1 text-xs font-bold rounded ${state.arrived ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-600'}">
-                                    ${state.arrived ? '🟢 已到' : '⚪ 未到'}
+                            <div class="flex gap-1 items-center">
+                                <button onclick="cycleArrivedStatus('${tableNum}', '${name}', '${currentArrivedStatus}')" class="px-2 py-1 text-xs font-black rounded border ${getArrivedStyle(currentArrivedStatus)}">
+                                    ${getArrivedLabel(currentArrivedStatus)}
                                 </button>
-                                <button onclick="cycleGift('${tableNum}', '${name}', '${state.gift}')" class="px-2 py-1 text-xs font-bold rounded ${state.gift !== '未交' ? 'bg-red-600 text-white' : 'bg-gray-200 text-gray-600'}">
-                                    ${getGiftLabel(state.gift)}
+                                <button onclick="cycleGift('${tableNum}', '${name}', '${currentGift}')" class="px-2 py-1 text-xs font-black rounded border ${currentGift !== '未交' ? 'bg-red-600 text-white border-red-700' : 'bg-gray-200 text-gray-600 border-gray-300'}">
+                                    ${getGiftLabel(currentGift)}
                                 </button>
                             </div>
                         `;
@@ -271,7 +324,6 @@
             if (status === '人情(封)') return "✉️ 人情";
             if (status === '送金器') return "👑 金器";
             if (status === '人情(電子)') return "📱 電子人情";
-            
             return "⚪ 禮金";
         }
 
