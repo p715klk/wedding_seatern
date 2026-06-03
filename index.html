@@ -17,7 +17,7 @@
 
     <div class="max-w-xl mx-auto mt-4 px-4">
         <div class="relative">
-            <input type="text" id="search-input" oninput="handleSearch()" placeholder="🔍 輸入姓名 / 分類 / 子分類 (如: 男方, LK)..." 
+            <input type="text" id="search-input" oninput="handleSearch()" placeholder="🔍 輸入姓名 / 分類 (如: 男方, LK, Aerial, VPower)..." 
                 class="w-full p-3 pl-10 pr-10 rounded-xl border-2 border-red-200 shadow-sm focus:outline-none focus:border-red-500 text-base">
             <button id="clear-search" onclick="clearSearch()" class="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 hidden font-bold">&times;</button>
         </div>
@@ -37,6 +37,7 @@
                 <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700 text-2xl font-bold px-2">&times;</button>
             </div>
             <div id="modal-content" class="p-4 overflow-y-auto space-y-3 flex-1"></div>
+            <div id="modal-footer-action" class="p-3 border-t bg-white"></div>
             <div class="p-4 border-t bg-gray-50 text-right">
                 <button onclick="closeModal()" class="bg-gray-500 text-white px-4 py-2 rounded shadow hover:bg-gray-600">關閉</button>
             </div>
@@ -145,16 +146,6 @@
             
             const guests = dbData[tableNum] || [];
             
-            let currentSeatOccupied = 0;
-            guests.forEach(guest => {
-                const state = statusState[`${tableNum}_${guest.name}`] || { arrived: '未到' };
-                if (state.arrived !== '取消') {
-                    currentSeatOccupied++;
-                }
-            });
-
-            document.getElementById('modal-title').innerText = `第 ${tableNum} 桌賓客名單 (現坐 ${currentSeatOccupied}/12 位)`;
-
             guests.forEach((guest, index) => {
                 const name = guest.name;
                 const side = guest.side || "";
@@ -192,30 +183,50 @@
                 container.appendChild(row);
             });
 
+            // 📌 抽離出來做動態刷新標題同底部的函數
+            renderTableFooterAndTitle(tableNum, guests);
+        }
+
+        // 📌 新增：動態處理人數與動態顯示加人掣，解決搜尋攔點擊時同步更新 Modal 嘅問題
+        function renderTableFooterAndTitle(tableNum, guests) {
+            let currentSeatOccupied = 0;
+            guests.forEach(guest => {
+                const state = statusState[`${tableNum}_${guest.name}`] || { arrived: '未到' };
+                if (state.arrived !== '取消') {
+                    currentSeatOccupied++;
+                }
+            });
+
+            document.getElementById('modal-title').innerText = `第 ${tableNum} 桌賓客名單 (現坐 ${currentSeatOccupied}/12 位)`;
+
+            const footerAction = document.getElementById('modal-footer-action');
             if (currentSeatOccupied < 12) {
-                const addRow = document.createElement('div');
-                addRow.className = "pt-2 text-center";
-                addRow.innerHTML = `
-                    <button onclick="addNewGuestInline('${tableNum}', ${guests.length})" class="w-full py-2.5 text-sm font-bold rounded-lg border-2 border-dashed border-red-300 text-red-700 bg-red-50 hover:bg-red-100 transition shadow-sm">
+                // 📌 Bug 3 修正：不再傳入 index 參數，直接由 addNewGuestInline 即時撈取最新長度避免覆蓋
+                footerAction.innerHTML = `
+                    <button onclick="addNewGuestInline('${tableNum}')" class="w-full py-2.5 text-sm font-bold rounded-lg border-2 border-dashed border-red-300 text-red-700 bg-red-50 hover:bg-red-100 transition shadow-sm">
                         + 填入此桌新賓客 / 臨時帶伴 (餘下 ${12 - currentSeatOccupied} 空位)
                     </button>
                 `;
-                container.appendChild(addRow);
             } else {
-                const fullRow = document.createElement('div');
-                fullRow.className = "pt-2 text-center text-xs font-bold text-gray-400 bg-gray-200/50 py-2 rounded-lg border border-dashed border-gray-300";
-                fullRow.innerText = "🔒 此圍已滿 12 人 (如需加人，請先將其他賓客設為「取消」釋放座位)";
-                container.appendChild(fullRow);
+                footerAction.innerHTML = `
+                    <div class="w-full text-center text-xs font-bold text-gray-400 bg-gray-200/50 py-2 rounded-lg border border-dashed border-gray-300">
+                        🔒 此圍已滿 12 人 (如需加人，請先將其他賓客設為「取消」釋放座位)
+                    </div>
+                `;
             }
         }
 
-        function addNewGuestInline(tableNum, currentLength) {
+        // 📌 Bug 3 修正：動態獲取最新數據長度，完美防呆不覆蓋
+        function addNewGuestInline(tableNum) {
+            const currentGuestsArray = dbData[tableNum] || [];
+            const nextIndex = currentGuestsArray.length; 
+
             const newName = prompt("請輸入新賓客姓名 (若是眷屬，請遵循：主客姓名 眷屬 X):");
             if (!newName || newName.trim() === "") return;
             const side = prompt("男方 定 女方？", "男方");
             const group = prompt("屬於邊個分類？ (例如: 家人 / LK / BDO / RSM)", "現場加座");
             
-            database.ref(`wedding_guests/${tableNum}/${currentLength}`).set({
+            database.ref(`wedding_guests/${tableNum}/${nextIndex}`).set({
                 name: newName.trim(),
                 side: side ? side.trim() : "男方",
                 group: group ? group.trim() : "現場加座"
@@ -223,8 +234,13 @@
         }
 
         function cycleArrivedStatus(table, name, currentStatus) {
+            // 📌 Bug 4 修正：清洗與相容舊數據
+            let sanitizedStatus = currentStatus;
+            if (currentStatus === true || currentStatus === '已到') sanitizedStatus = '已到';
+            else if (currentStatus === false || currentStatus === '未到') sanitizedStatus = '未到';
+
             const statusFlow = { '未到': '已到', '已到': '取消', '取消': '未到' };
-            const nextStatus = statusFlow[currentStatus] || '未到';
+            const nextStatus = statusFlow[sanitizedStatus] || '未到';
             database.ref(`guest_status/${table}_${name}/arrived`).set(nextStatus);
         }
 
@@ -279,7 +295,8 @@
                         const currentGift = statusState[key]?.gift || '未交';
                         
                         const row = document.createElement('div');
-                        row.className = "p-2 bg-red-50 hover:bg-red-100 rounded-lg flex justify-between items-center gap-2 border border-red-100 transition shadow-sm";
+                        // 📌 Bug 1 修正：搜尋列表入面如果係取消狀態，同樣加上淡淡的加刪除線樣式
+                        row.className = `p-2 rounded-lg flex justify-between items-center gap-2 border transition shadow-sm ${currentArrivedStatus === '取消' ? 'bg-red-50/40 opacity-50 line-through border-red-200' : 'bg-red-50 hover:bg-red-100 border-red-100'}`;
                         row.innerHTML = `
                             <div class="flex flex-col text-left cursor-pointer flex-1" onclick="openModalAndHighlight('${tableNum}')">
                                 <span class="font-bold text-gray-800">${name}</span>
@@ -309,19 +326,18 @@
         }
 
         function cycleGift(table, name, currentStatus) {
-            const stages = ['未交', '人情(封)', '人情(電子)', '送金器'];
+            const stages = ['未交', '人情', '送金器', '電子人情'];
             let nextIndex = (stages.indexOf(currentStatus) + 1) % stages.length;
             database.ref(`guest_status/${table}_${name}/gift`).set(stages[nextIndex]);
         }
 
         function getGiftLabel(status) {
-            if (status === '人情(封)') return "✉️ 人情";
+            if (status === '人情') return "✉️ 人情";
             if (status === '送金器') return "👑 金器";
-            if (status === '人情(電子)') return "📱 電子人情";
+            if (status === '電子人情') return "📱 電子人情";
             return "⚪ 禮金";
         }
 
-        // 📌 新增：統一提取禮金顏色樣式判斷，確保搜尋欄同彈窗一致
         function getGiftStyle(status) {
             if (status !== '未交') {
                 return "bg-red-600 text-white border-red-700";
