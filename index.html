@@ -16,13 +16,24 @@
     </header>
 
     <div class="max-w-xl mx-auto mt-4 px-4">
-        <div class="bg-gray-300 text-center py-2 rounded font-bold shadow-inner tracking-widest text-gray-700">舞台 STAGE</div>
+        <div class="relative">
+            <input type="text" id="search-input" oninput="handleSearch()" placeholder="🔍 輸入賓客姓名搜尋 (例如: 姑姐 / Alan)..." 
+                class="w-full p-3 pl-10 pr-10 rounded-xl border-2 border-red-200 shadow-sm focus:outline-none focus:border-red-500 text-base">
+            <button id="clear-search" onclick="clearSearch()" class="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 hidden font-bold">&times;</button>
+        </div>
+        
+        <div id="search-results" class="mt-2 space-y-2 max-h-60 overflow-y-auto hidden bg-white p-2 rounded-xl shadow-lg border border-gray-200">
+            </div>
     </div>
 
-    <!-- 逸東酒店 4直列網格平面圖 -->
+    <div id="stage-banner" class="max-w-xl mx-auto mt-4 px-4">
+        <div class="bg-gray-300 text-center py-2 rounded font-bold shadow-inner tracking-widest text-gray-700">
+            舞台 STAGE
+        </div>
+    </div>
+
     <main class="max-w-xl mx-auto p-4 grid grid-cols-4 gap-3 text-center" id="floor-plan"></main>
 
-    <!-- 賓客名單彈出視窗 -->
     <div id="guest-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
         <div class="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
             <div class="p-4 bg-red-50 border-b border-red-100 flex justify-between items-center">
@@ -51,9 +62,9 @@
         const layout = [
             ['.', '1', '2', '.'],
             ['.', '3', '4', '.'],
-            ['11', '5', '6', '13'],
-            ['12', '7', '8', '14'],
-            ['.', '9', '10', '.']
+            ['5', '6', '7', '8'],
+            ['9', '10', '11', '12'],
+            ['.', '13', '14', '.']
         ];
 
         let globalState = {}; // 存放從 Firebase 實時抓取嘅完整名單與狀態
@@ -79,14 +90,19 @@
         });
 
         // ==========================================
-        // 🔄 Firebase 實時監聽 (一有改動，即時全場同步)
+        // 🔄 Firebase 實時監聽
         // ==========================================
         database.ref('wedding_guests').on('value', (snapshot) => {
             globalState = snapshot.val() || {};
             updateFloorPlanSummary();
             
+            // 如果開緊某枱嘅 Modal，即時同步更新
             const currentTable = document.getElementById('guest-modal').getAttribute('data-current-table');
             if (currentTable) renderModalContent(currentTable);
+
+            // 如果搜尋欄有字，即時同步更新搜尋結果
+            const keyword = document.getElementById('search-input').value;
+            if (keyword.trim() !== '') handleSearch();
         });
 
         // 動態計算每枱入座率並變色
@@ -124,7 +140,108 @@
         }
 
         // ==========================================
-        // 🍱 Modal 彈出視窗：動態讀取該桌賓客
+        // 🔍 實時搜尋邏輯核心
+        // ==========================================
+        function handleSearch() {
+            const input = document.getElementById('search-input');
+            const clearBtn = document.getElementById('clear-search');
+            const resultsContainer = document.getElementById('search-results');
+            const keyword = input.value.trim().toLowerCase();
+
+            if (keyword === '') {
+                clearSearch();
+                return;
+            }
+
+            clearBtn.classList.remove('hidden');
+            resultsContainer.classList.remove('hidden');
+            resultsContainer.innerHTML = '';
+
+            let hasResults = false;
+
+            // 橫掃全場 1-14 枱搜尋
+            Object.keys(globalState).forEach(tableNum => {
+                const tableData = globalState[tableNum];
+                if (!tableData || !tableData.guests) return;
+
+                Object.keys(tableData.guests).forEach(name => {
+                    // 大小寫不敏感搜尋人名
+                    if (name.toLowerCase().includes(keyword)) {
+                        hasResults = true;
+                        const state = tableData.guests[name];
+                        
+                        // 建立搜尋結果行
+                        const row = document.createElement('div');
+                        row.className = "p-2 bg-red-50 hover:bg-red-100 rounded-lg flex justify-between items-center gap-2 border border-red-100 transition";
+                        
+                        // 姓名與桌號資訊
+                        const infoDiv = document.createElement('div');
+                        infoDiv.className = "flex flex-col text-left cursor-pointer flex-1";
+                        infoDiv.setAttribute('onclick', `openModalAndHighlight('${tableNum}')`);
+                        infoDiv.innerHTML = `
+                            <span class="font-bold text-gray-800">${name}</span>
+                            <span class="text-xs text-red-700 font-medium">第 ${tableNum} 桌</span>
+                        `;
+
+                        // 快速控制按鈕區
+                        const btnArea = document.createElement('div');
+                        btnArea.className = "flex gap-1";
+
+                        // 報到按鈕
+                        const arrBtn = document.createElement('button');
+                        arrBtn.className = state.arrived ? "px-2 py-1 text-xs font-bold rounded bg-green-600 text-white" : "px-2 py-1 text-xs font-bold rounded bg-gray-200 text-gray-600";
+                        arrBtn.innerText = state.arrived ? "🟢 已到" : "⚪ 未到";
+                        arrBtn.onclick = (e) => {
+                            e.stopPropagation(); // 防止觸發彈出該桌 Modal
+                            database.ref(`wedding_guests/${tableNum}/guests/${name}/arrived`).set(!state.arrived);
+                        };
+
+                        // 禮金按鈕
+                        const giftBtn = document.createElement('button');
+                        let giftClass = "px-2 py-1 text-xs font-bold rounded ";
+                        if (state.gift === '人情(封)') giftClass += "bg-red-600 text-white";
+                        else if (state.gift === '人情(電子)') giftClass += "bg-blue-600 text-white";
+                        else if (state.gift === '送金器') giftClass += "bg-yellow-500 text-white";
+                        else giftClass += "bg-gray-200 text-gray-600";
+
+                        giftBtn.className = giftClass;
+                        giftBtn.innerText = getGiftLabel(state.gift);
+                        giftBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            const stages = ['未交', '人情(封)', '人情(電子)', '送金器'];
+                            let nextIndex = (stages.indexOf(state.gift) + 1) % stages.length;
+                            database.ref(`wedding_guests/${tableNum}/guests/${name}/gift`).set(stages[nextIndex]);
+                        };
+
+                        btnArea.appendChild(arrBtn);
+                        btnArea.appendChild(giftBtn);
+                        row.appendChild(infoDiv);
+                        row.appendChild(btnArea);
+                        resultsContainer.appendChild(row);
+                    }
+                });
+            });
+
+            if (!hasResults) {
+                resultsContainer.innerHTML = '<p class="text-gray-400 text-sm py-2">找不到此賓客名單</p>';
+            }
+        }
+
+        function clearSearch() {
+            document.getElementById('search-input').value = '';
+            document.getElementById('clear-search').classWith = document.getElementById('clear-search').classList.add('hidden');
+            document.getElementById('search-results').classList.add('hidden');
+            document.getElementById('search-results').innerHTML = '';
+        }
+
+        // 點擊搜尋結果，自動幫佢打開嗰一枱嘅名單
+        function openModalAndHighlight(tableNum) {
+            clearSearch();
+            openModal(tableNum);
+        }
+
+        // ==========================================
+        // 🍱 Modal 彈出視窗相關邏輯
         // ==========================================
         function openModal(tableNum) {
             document.getElementById('guest-modal').classList.remove('hidden');
@@ -163,7 +280,7 @@
                 const btnArea = document.createElement('div');
                 btnArea.className = "flex gap-1 w-full sm:w-auto justify-end";
 
-                // 報到狀態 Toggle
+                // 報到狀態
                 const arrBtn = document.createElement('button');
                 arrBtn.className = state.arrived ? "px-3 py-1.5 text-xs font-bold rounded bg-green-600 text-white shadow" : "px-3 py-1.5 text-xs font-bold rounded bg-gray-200 text-gray-600 hover:bg-gray-300";
                 arrBtn.innerText = state.arrived ? "🟢 已到" : "⚪ 未到";
@@ -171,7 +288,7 @@
                     database.ref(`wedding_guests/${tableNum}/guests/${name}/arrived`).set(!state.arrived);
                 };
 
-                // 禮金狀態切換
+                // 禮金狀態
                 const giftBtn = document.createElement('button');
                 let giftClass = "px-3 py-1.5 text-xs font-bold rounded ";
                 if (state.gift === '人情(封)') giftClass += "bg-red-600 text-white shadow";
