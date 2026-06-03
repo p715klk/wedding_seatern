@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>婚宴即時同步帶位系統 (Eaton HK - Maggie Q)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans pb-12">
+
+    <header class="bg-red-700 text-white p-4 shadow-md sticky top-0 z-50 text-center">
+        <h1 class="text-xl font-bold tracking-wider">Wedding Guest Manager</h1>
+        <p class="text-xs opacity-90 mt-1">逸東酒店 Maggie (玉) 宴會廳 現場即時同步系統</p>
+    </header>
+
+    <div class="max-w-xl mx-auto mt-4 px-4">
+        <div class="bg-gray-300 text-center py-2 rounded font-bold shadow-inner tracking-widest text-gray-700">舞台 STAGE</div>
+    </div>
+
+    <!-- 逸東酒店 4直列網格平面圖 -->
+    <main class="max-w-xl mx-auto p-4 grid grid-cols-4 gap-3 text-center" id="floor-plan"></main>
+
+    <!-- 賓客名單彈出視窗 -->
+    <div id="guest-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
+            <div class="p-4 bg-red-50 border-b border-red-100 flex justify-between items-center">
+                <h2 id="modal-title" class="text-lg font-bold text-red-800">載入中...</h2>
+                <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700 text-2xl font-bold px-2">&times;</button>
+            </div>
+            <div id="modal-content" class="p-4 overflow-y-auto space-y-4 flex-1"></div>
+            <div class="p-4 border-t bg-gray-50 text-right">
+                <button onclick="closeModal()" class="bg-gray-500 text-white px-4 py-2 rounded shadow hover:bg-gray-600">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 🛠️ 填入你嘅 Firebase Database 網址
+        // ==========================================
+        const firebaseConfig = {
+            databaseURL: "https://wedding-seatern-default-rtdb.asia-southeast1.firebasedatabase.app/" 
+        };
+        
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        // 逸東酒店 Maggie 廳網格配置 (對應 4 直列 Grid)
+        const layout = [
+            ['.', '1', '2', '.'],
+            ['.', '3', '4', '.'],
+            ['11', '5', '6', '13'],
+            ['12', '7', '8', '14'],
+            ['.', '9', '10', '.']
+        ];
+
+        let globalState = {}; // 存放從 Firebase 實時抓取嘅完整名單與狀態
+
+        // 渲染大廳桌位平面圖
+        const floorPlan = document.getElementById('floor-plan');
+        layout.forEach(row => {
+            row.forEach(cell => {
+                const div = document.createElement('div');
+                if (cell === '.') {
+                    div.className = "h-20";
+                } else {
+                    div.className = "bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center h-24 cursor-pointer hover:border-red-400 transition active:scale-95";
+                    div.id = `table-card-${cell}`;
+                    div.setAttribute('onclick', `openModal('${cell}')`);
+                    div.innerHTML = `
+                        <span class="text-sm font-bold text-gray-500">第 ${cell} 桌</span>
+                        <div class="w-12 h-12 rounded-full border-4 border-gray-300 flex items-center justify-center text-xs font-black text-gray-400" id="table-circle-${cell}">0%</div>
+                    `;
+                }
+                floorPlan.appendChild(div);
+            });
+        });
+
+        // ==========================================
+        // 🔄 Firebase 實時監聽 (一有改動，即時全場同步)
+        // ==========================================
+        database.ref('wedding_guests').on('value', (snapshot) => {
+            globalState = snapshot.val() || {};
+            updateFloorPlanSummary();
+            
+            const currentTable = document.getElementById('guest-modal').getAttribute('data-current-table');
+            if (currentTable) renderModalContent(currentTable);
+        });
+
+        // 動態計算每枱入座率並變色
+        function updateFloorPlanSummary() {
+            Object.keys(globalState).forEach(table => {
+                const tableData = globalState[table];
+                if (!tableData || !tableData.guests) return;
+
+                const guests = tableData.guests;
+                const guestNames = Object.keys(guests);
+                let arrivedCount = 0;
+
+                guestNames.forEach(name => {
+                    if (guests[name].arrived) arrivedCount++;
+                });
+                
+                const percent = guestNames.length ? Math.round((arrivedCount / guestNames.length) * 100) : 0;
+                const circle = document.getElementById(`table-circle-${table}`);
+                const card = document.getElementById(`table-card-${table}`);
+                
+                if (circle && card) {
+                    circle.innerText = `${percent}%`;
+                    if (percent === 100) {
+                        circle.className = "w-12 h-12 rounded-full border-4 border-green-500 bg-green-50 flex items-center justify-center text-xs font-black text-green-600";
+                        card.className = card.className.replace(/border-gray-200|border-orange-300/, 'border-green-500');
+                    } else if (percent > 0) {
+                        circle.className = "w-12 h-12 rounded-full border-4 border-orange-400 bg-orange-50 flex items-center justify-center text-xs font-black text-orange-500";
+                        card.className = card.className.replace(/border-gray-200|border-green-500/, 'border-orange-300');
+                    } else {
+                        circle.className = "w-12 h-12 rounded-full border-4 border-gray-300 bg-white flex items-center justify-center text-xs font-black text-gray-400";
+                        card.className = card.className.replace(/border-green-500|border-orange-300/, 'border-gray-200');
+                    }
+                }
+            });
+        }
+
+        // ==========================================
+        // 🍱 Modal 彈出視窗：動態讀取該桌賓客
+        // ==========================================
+        function openModal(tableNum) {
+            document.getElementById('guest-modal').classList.remove('hidden');
+            document.getElementById('guest-modal').setAttribute('data-current-table', tableNum);
+            renderModalContent(tableNum);
+        }
+
+        function closeModal() {
+            document.getElementById('guest-modal').classList.add('hidden');
+            document.getElementById('guest-modal').removeAttribute('data-current-table');
+        }
+
+        function renderModalContent(tableNum) {
+            const container = document.getElementById('modal-content');
+            container.innerHTML = '';
+            
+            const tableData = globalState[tableNum];
+            if (!tableData || !tableData.guests) {
+                container.innerHTML = '<p class="text-gray-400 text-center">此桌暫無賓客名單</p>';
+                return;
+            }
+
+            const guests = tableData.guests;
+            const guestNames = Object.keys(guests);
+            document.getElementById('modal-title').innerText = `第 ${tableNum} 桌賓客名單 (共 ${guestNames.length} 位)`;
+
+            guestNames.forEach(name => {
+                const state = guests[name];
+                const row = document.createElement('div');
+                row.className = "p-3 bg-gray-50 rounded-lg border border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 shadow-sm";
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.className = "font-medium text-gray-800 text-base flex-1";
+                nameSpan.innerText = name;
+
+                const btnArea = document.createElement('div');
+                btnArea.className = "flex gap-1 w-full sm:w-auto justify-end";
+
+                // 報到狀態 Toggle
+                const arrBtn = document.createElement('button');
+                arrBtn.className = state.arrived ? "px-3 py-1.5 text-xs font-bold rounded bg-green-600 text-white shadow" : "px-3 py-1.5 text-xs font-bold rounded bg-gray-200 text-gray-600 hover:bg-gray-300";
+                arrBtn.innerText = state.arrived ? "🟢 已到" : "⚪ 未到";
+                arrBtn.onclick = () => {
+                    database.ref(`wedding_guests/${tableNum}/guests/${name}/arrived`).set(!state.arrived);
+                };
+
+                // 禮金狀態切換
+                const giftBtn = document.createElement('button');
+                let giftClass = "px-3 py-1.5 text-xs font-bold rounded ";
+                if (state.gift === '人情(封)') giftClass += "bg-red-600 text-white shadow";
+                else if (state.gift === '人情(電子)') giftClass += "bg-blue-600 text-white shadow";
+                else if (state.gift === '送金器') giftClass += "bg-yellow-500 text-white shadow";
+                else giftClass += "bg-gray-200 text-gray-600 hover:bg-gray-300";
+
+                giftBtn.className = giftClass;
+                giftBtn.innerText = getGiftLabel(state.gift);
+                giftBtn.onclick = () => {
+                    const stages = ['未交', '人情(封)', '人情(電子)', '送金器'];
+                    let nextIndex = (stages.indexOf(state.gift) + 1) % stages.length;
+                    database.ref(`wedding_guests/${tableNum}/guests/${name}/gift`).set(stages[nextIndex]);
+                };
+
+                btnArea.appendChild(arrBtn);
+                btnArea.appendChild(giftBtn);
+                row.appendChild(nameSpan);
+                row.appendChild(btnArea);
+                container.appendChild(row);
+            });
+        }
+
+        function getGiftLabel(status) {
+            if (status === '人情(封)') return "✉️ 封";
+            if (status === '人情(電子)') return "📱 電子";
+            if (status === '送金器') return "👑 金器";
+            return "⚪ 禮金";
+        }
+    </script>
+</body>
+</html>
