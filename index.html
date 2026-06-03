@@ -102,7 +102,6 @@
 
                 guests.forEach(guest => {
                     const state = statusState[`${table}_${guest.name}`] || { arrived: '未到' };
-                    // 📌 只要唔係取消，就計算入去計劃出席人數
                     if (state.arrived !== '取消') {
                         activeCount++;
                         if (state.arrived === '已到') arrivedCount++;
@@ -146,7 +145,6 @@
             
             const guests = dbData[tableNum] || [];
             
-            // 📌 計算實質佔位人數 (總人數 減去 選擇咗取消嘅人)
             let currentSeatOccupied = 0;
             guests.forEach(guest => {
                 const state = statusState[`${tableNum}_${guest.name}`] || { arrived: '未到' };
@@ -163,7 +161,6 @@
                 const group = guest.group || "";
                 const key = `${tableNum}_${name}`;
                 
-                // 📌 兼容舊數據，如果原本係 boolean 轉返做字串
                 let rawArrived = statusState[key]?.arrived;
                 let currentArrivedStatus = '未到';
                 if (rawArrived === true || rawArrived === '已到') currentArrivedStatus = '已到';
@@ -173,7 +170,6 @@
                 const isJwsRow = name.includes("眷屬");
 
                 const row = document.createElement('div');
-                // 如果係取消狀態，成行字變淡加刪除線
                 row.className = `p-2.5 rounded-lg border flex justify-between items-center gap-2 shadow-sm ${currentArrivedStatus === '取消' ? 'bg-red-50/50 opacity-50 line-through border-red-200' : isJwsRow ? 'bg-gray-100/70 border-dashed border-gray-300' : 'bg-gray-50 border-gray-200'}`;
                 
                 row.innerHTML = `
@@ -188,7 +184,7 @@
                         <button onclick="cycleArrivedStatus('${tableNum}', '${name}', '${currentArrivedStatus}')" class="px-2.5 py-2 text-xs font-black rounded border shadow-sm ${getArrivedStyle(currentArrivedStatus)}">
                             ${getArrivedLabel(currentArrivedStatus)}
                         </button>
-                        <button onclick="cycleGift('${tableNum}', '${name}', '${currentGift}')" class="px-2.5 py-2 text-xs font-black rounded border shadow-sm ${currentGift !== '未交' ? 'bg-red-600 text-white border-red-700' : 'bg-gray-200 text-gray-600 border-gray-300'}">
+                        <button onclick="cycleGift('${tableNum}', '${name}', '${currentGift}')" class="px-2.5 py-2 text-xs font-black rounded border shadow-sm ${getGiftStyle(currentGift)}">
                             ${getGiftLabel(currentGift)}
                         </button>
                     </div>
@@ -196,7 +192,6 @@
                 container.appendChild(row);
             });
 
-            // 📌 第1點修改：防呆機制。如果未滿 12 人就顯示加人掣；滿 12 人就自動隱藏，確保唔會超載
             if (currentSeatOccupied < 12) {
                 const addRow = document.createElement('div');
                 addRow.className = "pt-2 text-center";
@@ -227,7 +222,6 @@
             });
         }
 
-        // 三段式簽到切換：未到 -> 已到 -> 取消 -> 未到
         function cycleArrivedStatus(table, name, currentStatus) {
             const statusFlow = { '未到': '已到', '已到': '取消', '取消': '未到' };
             const nextStatus = statusFlow[currentStatus] || '未到';
@@ -299,7 +293,7 @@
                                 <button onclick="cycleArrivedStatus('${tableNum}', '${name}', '${currentArrivedStatus}')" class="px-2 py-1 text-xs font-black rounded border ${getArrivedStyle(currentArrivedStatus)}">
                                     ${getArrivedLabel(currentArrivedStatus)}
                                 </button>
-                                <button onclick="cycleGift('${tableNum}', '${name}', '${currentGift}')" class="px-2 py-1 text-xs font-black rounded border ${currentGift !== '未交' ? 'bg-red-600 text-white border-red-700' : 'bg-gray-200 text-gray-600 border-gray-300'}">
+                                <button onclick="cycleGift('${tableNum}', '${name}', '${currentGift}')" class="px-2 py-1 text-xs font-black rounded border ${getGiftStyle(currentGift)}">
                                     ${getGiftLabel(currentGift)}
                                 </button>
                             </div>
@@ -325,6 +319,14 @@
             if (status === '送金器') return "👑 金器";
             if (status === '人情(電子)') return "📱 電子人情";
             return "⚪ 禮金";
+        }
+
+        // 📌 新增：統一提取禮金顏色樣式判斷，確保搜尋欄同彈窗一致
+        function getGiftStyle(status) {
+            if (status !== '未交') {
+                return "bg-red-600 text-white border-red-700";
+            }
+            return "bg-gray-200 text-gray-600 border-gray-300";
         }
 
         document.getElementById('guest-modal').addEventListener('click', function(e) {
