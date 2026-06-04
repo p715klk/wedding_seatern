@@ -8,7 +8,6 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <style>
-        /* 模擬 Excel 邊框同滾動條 */
         .excel-table th, .excel-table td {
             border: 1px solid #e2e8f0;
         }
@@ -21,16 +20,21 @@
 <body class="bg-gray-100 text-gray-800 font-sans p-4 sm:p-6">
 
     <div class="max-w-6xl mx-auto">
-        <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-300 pb-4 mb-6 gap-4">
+        <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-gray-300 pb-4 mb-6 gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-red-700">📋 賓客名單 Excel 管理後台</h1>
-                <p class="text-xs text-gray-500 mt-1">好似 Google Sheets 咁直接修改，全自動同步 Firebase</p>
+                <p class="text-xs text-gray-500 mt-1">直接修改資料，或一鍵匯入 Google Excel (CSV) 檔案</p>
             </div>
-            <div class="flex gap-2 w-full sm:w-auto">
-                <button onclick="addNewRow()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow transition flex-1 sm:flex-none">
+            <div class="flex flex-wrap gap-2 w-full lg:w-auto">
+                <input type="file" id="csv-file-input" accept=".csv" class="hidden" onchange="handleCSVUpload(this)">
+                <button onclick="document.getElementById('csv-file-input').click()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow transition">
+                    📂 匯入 CSV 舊名單
+                </button>
+                
+                <button onclick="addNewRow()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow transition">
                     ➕ 新增賓客一行
                 </button>
-                <button onclick="saveExcelToFirebase()" class="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg text-sm font-black tracking-wider shadow transition flex-1 sm:flex-none">
+                <button onclick="saveExcelToFirebase()" class="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg text-sm font-black tracking-wider shadow transition">
                     💾 儲存變更
                 </button>
                 <a href="../index.html" class="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg text-sm font-bold shadow transition text-center">
@@ -57,7 +61,7 @@
                 </tbody>
             </table>
         </div>
-        <p class="text-xs text-gray-400 mt-2">💡 提示：改完記得點擊右上角「儲存變更」，前台畫面就會即時重新載入。</p>
+        <p class="text-xs text-gray-400 mt-2">💡 提示：如果 Google Sheets 頂頭欄位是「姓名, 分類, 桌次」，直接導出 CSV 匯入即可自動配對！</p>
     </div>
 
     <script src="admin.js"></script>
