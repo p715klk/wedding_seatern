@@ -158,24 +158,20 @@ function sortLocalList() {
     });
 }
 
-// 📌 1. 優化：新增一行賓客，全自動流暢滾動落底
 function addNewRow() {
-    const newGuest = { table: 14, sort: 99, name: "", side: "男方", group: "" }; // 設為最後一桌方便沉底
+    const newGuest = { table: 14, sort: 99, name: "", side: "男方", group: "" }; 
     localGuestsList.push(newGuest);
     
-    // 渲染最後一行
     const newIndex = localGuestsList.length - 1;
     const newRowDOM = createRowDOM(newGuest, newIndex);
     
     recalculateSortNumbersFromDOM();
-    
-    // 加個漂亮的高亮綠色動畫，等工作人員一眼認到加咗邊行
     newRowDOM.classList.add('new-row-animate');
 
-    // 關鍵：將 Excel 容器捲動到最底部
     setTimeout(() => {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-        // 自動聚焦去姓名輸入框，可以立即打字
+        if(scrollContainer) {
+            scrollContainer.scrollTop = scrollContainer.scrollHeight;
+        }
         newRowDOM.querySelector('input[type="text"]').focus();
     }, 50);
 }
@@ -213,42 +209,33 @@ function saveExcelToFirebase() {
     }
 }
 
-// 📌 2. 新增：控制側邊欄 Setting Menu 顯示與隱藏
 function toggleSettingsModal(show) {
     const sidebar = document.getElementById('settings-sidebar');
-    if (show) {
-        sidebar.classList.remove('hidden');
-    } else {
-        sidebar.classList.add('hidden');
+    if (sidebar) {
+        if (show) sidebar.classList.remove('hidden');
+        else sidebar.classList.add('hidden');
     }
 }
 
-// 📌 3. 新增：匯出目前名單為 CSV 檔案
 function exportTableToCSV() {
     if (localGuestsList.length === 0) {
         alert("目前沒有任何數據可以匯出。");
         return;
     }
 
-    // 建立 CSV Header
     let csvContent = "姓名,分類,子分類,桌次,排序\n";
 
-    // 將背後的數據逐筆寫入橫行
     localGuestsList.forEach(guest => {
         if (guest && guest.name) {
-            // 清理可能污染 CSV 的逗號
             const name = guest.name.replace(/,/g, ' ');
             const side = guest.side.replace(/,/g, ' ');
             const group = guest.group.replace(/,/g, ' ');
-            
             csvContent += `${name},${side},${group},第${guest.table}桌,${guest.sort}\n`;
         }
     });
 
-    // 加上 UTF-8 BOM 檔頭 (\uFEFF)，防止 Microsoft Excel 直接開啟時出現中文字亂碼
     const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
-    
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
     link.setAttribute("download", `Wedding_Guests_Backup_${new Date().toISOString().slice(0,10)}.csv`);
@@ -258,10 +245,9 @@ function exportTableToCSV() {
     link.click();
     document.body.removeChild(link);
     
-    toggleSettingsModal(false); // 關閉側邊欄
+    toggleSettingsModal(false); 
 }
 
-// CSV 匯入邏輯 (保持並完美融合)
 function handleCSVUpload(input) {
     const file = input.files[0];
     if (!file) return;
@@ -313,23 +299,26 @@ function handleCSVUpload(input) {
 (function() {
     let adminLastTouchEnd = 0;
 
+    // 1. 攔截雙指放大手勢觸發
     document.addEventListener('touchstart', function (event) {
         if (event.touches.length > 1) {
             event.preventDefault();
         }
     }, { passive: false });
 
-    // 🚨 安全檢查，防止網頁崩潰
+    // 2. 安全檢查：避免在非 Safari 瀏覽器環境報錯 (修復關鍵)
     document.addEventListener('touchmove', function (event) {
         if (event.scale !== undefined && event.scale !== 1) {
             event.preventDefault();
         }
     }, { passive: false });
 
+    // 3. 攔截 iOS 專屬雙指手勢
     document.addEventListener('gesturestart', function (event) {
         event.preventDefault();
     }, { passive: false });
 
+    // 4. 攔截快速連點兩下
     document.addEventListener('touchend', function (event) {
         const now = (new Date()).getTime();
         if (now - adminLastTouchEnd <= 300) {
