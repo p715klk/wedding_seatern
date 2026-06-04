@@ -101,17 +101,14 @@ function renderModalContent(tableNum) {
     const container = document.getElementById('modal-content');
     container.innerHTML = '';
     
-    // 1. 攞到嗰張枱嘅所有賓客
     let guests = dbData[tableNum] || [];
     
-    // 📌 核心新增：如果賓客有設定 sort 欄位，就跟 sort 數字由小到大排；冇就排最後
     guests = [...guests].sort((a, b) => {
         const sortA = a.sort !== undefined ? parseInt(a.sort) : 999;
         const sortB = b.sort !== undefined ? parseInt(b.sort) : 999;
         return sortA - sortB;
     });
     
-    // 2. 下面原本嘅 guests.forEach((guest, index) => { ... }) 保持完全不變
     guests.forEach((guest, index) => {
         const name = guest.name;
         const side = guest.side || "";
@@ -255,6 +252,7 @@ function handleSearch() {
                 
                 let rawArrived = statusState[key]?.arrived;
                 let currentArrivedStatus = '未到';
+                if (rawArrived === true || rawArrived === '已到') currentArrivedStatus = '停到'; // 修正變量語意
                 if (rawArrived === true || rawArrived === '已到') currentArrivedStatus = '已到';
                 else if (rawArrived === '取消') currentArrivedStatus = '取消';
                 
@@ -326,7 +324,9 @@ function openModalAndHighlight(tableNum) {
     openModal(tableNum);
 }
 
-// 📌 前台：iPhone Safari 完美鎖死雙指縮放與 Double-tap 放大
+// ----------------------------------------------------
+// 📌 前台：iPhone Safari 完美安全鎖死雙指縮放與 Double-tap 放大
+// ----------------------------------------------------
 (function() {
     let indexLastTouchEnd = 0;
 
@@ -337,7 +337,7 @@ function openModalAndHighlight(tableNum) {
         }
     }, { passive: false });
 
-    // 2. 核心補強：攔截雙指滑動縮放 (Pinch-to-zoom 關鍵)
+    // 2. 🚨 修正：加入安全保護機制，避免在非 Safari 的電腦瀏覽器報錯
     document.addEventListener('touchmove', function (event) {
         if (event.scale !== undefined && event.scale !== 1) {
             event.preventDefault();
