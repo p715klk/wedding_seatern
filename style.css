@@ -1,0 +1,8 @@
+/* 自訂全域樣式 */
+body {
+    -webkit-user-select: none; /* Safari */
+    -ms-user-select: none;     /* IE 10+ */
+    user-select: none;         /* 防呆：禁止現場工作人員不小心反白選取文字 */
+}
+
+/* 如果日後想加自訂的 CSS 樣式，可以全部寫喺呢度 */
