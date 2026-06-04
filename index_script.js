@@ -341,3 +341,26 @@ document.addEventListener('touchend', function (event) {
     }
     lastTouchEnd = now;
 }, false);
+
+// 📌 iPhone Safari 強效鎖死手機雙指縮放與 Double-tap 放大
+// 攔截雙指 Pinch 手勢
+document.addEventListener('touchstart', function (event) {
+    if (event.touches.length > 1) {
+        event.preventDefault();
+    }
+}, { passive: false });
+
+// 攔截 iOS 專屬雙指放大手勢
+document.addEventListener('gesturestart', function (event) {
+    event.preventDefault();
+}, { passive: false });
+
+// 攔截 300 毫秒內快速連點兩下 (Double-tap) 
+let lastTouchEnd = 0;
+document.addEventListener('touchend', function (event) {
+    const now = (new Date()).getTime();
+    if (now - lastTouchEnd <= 300) {
+        event.preventDefault();
+    }
+    lastTouchEnd = now;
+}, false);
