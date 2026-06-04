@@ -6,15 +6,15 @@ firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
 const tbody = document.getElementById('excel-tbody');
+const scrollContainer = document.getElementById('table-scroll-container');
 let localGuestsList = []; 
 
-// 📌 初始化 SortableJS 拖拉功能
+// 初始化 SortableJS
 Sortable.create(tbody, {
-    handle: '.drag-handle', // 只有按住 ☰ 才可以拖動，方便輸入框打字
-    animation: 150,        // 拖動動畫速度
-    ghostClass: 'sortable-ghost', // 拖動時的預覽樣式
+    handle: '.drag-handle',
+    animation: 150,
+    ghostClass: 'sortable-ghost',
     onEnd: function () {
-        // 核心邏輯：當用家拖拉放手後，重新根據畫面的 DOM 順序刷新 localGuestsList 並重編 sort 數字
         recalculateSortNumbersFromDOM();
     }
 });
@@ -50,7 +50,6 @@ function renderExcelTable(weddingGuests) {
         });
     });
 
-    // 第一次由 Firebase 載入時，先跟枱號、再跟 sort 排序
     sortLocalList();
 
     if (localGuestsList.length === 0) {
@@ -62,7 +61,6 @@ function renderExcelTable(weddingGuests) {
     refreshTableUI();
 }
 
-// 將目前的 localGuestsList 渲染上網頁畫面
 function refreshTableUI() {
     tbody.innerHTML = '';
     localGuestsList.forEach((guest, index) => {
@@ -74,7 +72,6 @@ function createRowDOM(guest, index) {
     const tr = document.createElement('tr');
     tr.className = "hover:bg-gray-50 transition bg-white";
     tr.id = `excel-row-${index}`;
-    // 儲存目前在陣列的 index 方便追蹤
     tr.setAttribute('data-index', index); 
 
     let tableOptions = '';
@@ -84,7 +81,6 @@ function createRowDOM(guest, index) {
 
     tr.innerHTML = `
         <td class="p-2 text-center bg-gray-50 text-gray-400 drag-handle text-base font-bold">☰</td>
-        
         <td class="p-1 text-center bg-gray-50">
             <select onchange="updateLocalData(${index}, 'table', this.value); onTableChange();" class="w-full text-center p-1.5 bg-transparent border-0 focus:bg-white focus:ring-1 focus:ring-green-500 font-bold text-gray-700 table-select">
                 ${tableOptions}
@@ -112,6 +108,7 @@ function createRowDOM(guest, index) {
         </td>
     `;
     tbody.appendChild(tr);
+    return tr;
 }
 
 function updateLocalData(index, field, value) {
@@ -120,18 +117,15 @@ function updateLocalData(index, field, value) {
     }
 }
 
-// 📌 當用家手動改咗某個人嘅「桌次」，我哋自動重新編排兼排序，等同枱嘅人聚返埋一齊
 function onTableChange() {
     recalculateSortNumbersFromDOM();
     sortLocalList();
     refreshTableUI();
 }
 
-// 📌 核心重編：跟據目前畫面的 DOM 行列次序，重新洗牌每一桌內部的 sort 權重數字
 function recalculateSortNumbersFromDOM() {
     const rows = tbody.querySelectorAll('tr');
-    const tableCounters = {}; // 用來記錄每張枱目前數到第幾個人
-
+    const tableCounters = {};
     const updatedList = [];
 
     rows.forEach(row => {
@@ -139,27 +133,19 @@ function recalculateSortNumbersFromDOM() {
         const guest = localGuestsList[oldIndex];
         
         if (guest) {
-            // 攞返目前呢行畫面上選取嘅桌次
             const currentTable = parseInt(row.querySelector('.table-select').value) || 1;
             guest.table = currentTable;
 
-            // 初始化或累加該桌人數計數器
             if (!tableCounters[currentTable]) tableCounters[currentTable] = 1;
             else tableCounters[currentTable]++;
 
-            // 重新賦予 sort 數字：1, 2, 3...
             guest.sort = tableCounters[currentTable];
-            
-            // 即時更新畫面上的唯讀數字輸入框
             row.querySelector('.sort-input').value = guest.sort;
-
             updatedList.push(guest);
         }
     });
 
-    // 將網頁上看到的順序，寫回背後的暫存記憶體
     localGuestsList = updatedList;
-    // 重新綁定 index，確保打字更新不會錯位
     rows.forEach((row, newIdx) => {
         row.setAttribute('data-index', newIdx);
     });
@@ -172,11 +158,26 @@ function sortLocalList() {
     });
 }
 
+// 📌 1. 優化：新增一行賓客，全自動流暢滾動落底
 function addNewRow() {
-    const newGuest = { table: 1, sort: 99, name: "", side: "男方", group: "" };
+    const newGuest = { table: 14, sort: 99, name: "", side: "男方", group: "" }; // 設為最後一桌方便沉底
     localGuestsList.push(newGuest);
-    refreshTableUI();
+    
+    // 渲染最後一行
+    const newIndex = localGuestsList.length - 1;
+    const newRowDOM = createRowDOM(newGuest, newIndex);
+    
     recalculateSortNumbersFromDOM();
+    
+    // 加個漂亮的高亮綠色動畫，等工作人員一眼認到加咗邊行
+    newRowDOM.classList.add('new-row-animate');
+
+    // 關鍵：將 Excel 容器捲動到最底部
+    setTimeout(() => {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+        // 自動聚焦去姓名輸入框，可以立即打字
+        newRowDOM.querySelector('input[type="text"]').focus();
+    }, 50);
 }
 
 function deleteRow(index) {
@@ -207,12 +208,60 @@ function saveExcelToFirebase() {
 
     if (confirm("🚨 確定要儲存 Excel 變更並覆蓋 Firebase 嗎？")) {
         database.ref('wedding_guests').set(finalWeddingGuestsJSON)
-            .then(() => { alert("✅ 儲存成功！拖拉排序已完美同步。"); })
+            .then(() => { alert("✅ 儲存成功！"); })
             .catch((error) => { alert("❌ 儲存失敗: " + error.message); });
     }
 }
 
-// CSV 匯入也支援自動重編排序
+// 📌 2. 新增：控制側邊欄 Setting Menu 顯示與隱藏
+function toggleSettingsModal(show) {
+    const sidebar = document.getElementById('settings-sidebar');
+    if (show) {
+        sidebar.classList.remove('hidden');
+    } else {
+        sidebar.classList.add('hidden');
+    }
+}
+
+// 📌 3. 新增：匯出目前名單為 CSV 檔案
+function exportTableToCSV() {
+    if (localGuestsList.length === 0) {
+        alert("目前沒有任何數據可以匯出。");
+        return;
+    }
+
+    // 建立 CSV Header
+    let csvContent = "姓名,分類,子分類,桌次,排序\n";
+
+    // 將背後的數據逐筆寫入橫行
+    localGuestsList.forEach(guest => {
+        if (guest && guest.name) {
+            // 清理可能污染 CSV 的逗號
+            const name = guest.name.replace(/,/g, ' ');
+            const side = guest.side.replace(/,/g, ' ');
+            const group = guest.group.replace(/,/g, ' ');
+            
+            csvContent += `${name},${side},${group},第${guest.table}桌,${guest.sort}\n`;
+        }
+    });
+
+    // 加上 UTF-8 BOM 檔頭 (\uFEFF)，防止 Microsoft Excel 直接開啟時出現中文字亂碼
+    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Wedding_Guests_Backup_${new Date().toISOString().slice(0,10)}.csv`);
+    link.style.visibility = 'hidden';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    toggleSettingsModal(false); // 關閉側邊欄
+}
+
+// CSV 匯入邏輯 (保持並完美融合)
 function handleCSVUpload(input) {
     const file = input.files[0];
     if (!file) return;
@@ -242,7 +291,7 @@ function handleCSVUpload(input) {
             
             localGuestsList.push({
                 table: parseInt(cleanTable),
-                sort: 99, // 暫代
+                sort: 99, 
                 name: row[nameIdx],
                 side: sideIdx !== -1 ? (row[sideIdx] || "男方") : "男方",
                 group: groupIdx !== -1 ? (row[groupIdx] || "") : ""
@@ -251,7 +300,7 @@ function handleCSVUpload(input) {
 
         sortLocalList();
         refreshTableUI();
-        recalculateSortNumbersFromDOM(); // 全自動賦予 1, 2, 3...
+        recalculateSortNumbersFromDOM();
 
         alert(`📂 成功從 CSV 載入 ${localGuestsList.length} 位賓客！確認無誤後請點擊「儲存變更」。`);
     };
