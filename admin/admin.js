@@ -6,30 +6,38 @@ firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
 const tbody = document.getElementById('excel-tbody');
-let localGuestsList = []; // 用埋做本地緩存，格式：[{table: "1", name: "張三", side: "男方", group: "家人"}]
+let localGuestsList = []; 
 
 // 監聽 Firebase 數據
 database.ref('wedding_guests').on('value', (snapshot) => {
-    const weddingGuests = snapshot.val() || {};
+    const weddingGuests = snapshot.val();
     
-    // 只有在工作人員沒有在打字/編輯時，才重新渲染表格，防止跳字
+    // 📌 修正：如果 Firebase 數據完全是空 (null)，主動給予空物件，避免卡在「載入中」
+    if (!weddingGuests) {
+        renderExcelTable({});
+        return;
+    }
+    
     if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
         renderExcelTable(weddingGuests);
     }
+}, (error) => {
+    // 📌 修正：如果是權限或連線問題，彈出提示
+    tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-red-500 font-bold">Firebase 連線失敗，請檢查權限或 Database URL！</td></tr>`;
 });
 
-// 將 JSON 轉成 Excel 行列
 function renderExcelTable(weddingGuests) {
     localGuestsList = [];
     tbody.innerHTML = '';
 
-    // 將原本按「桌號」分類的 JSON 拆開，方便好似 Excel 咁排序同加減
     Object.keys(weddingGuests).forEach(tableNum => {
         const guests = weddingGuests[tableNum] || [];
         guests.forEach(guest => {
             if (guest && guest.name) {
+                // 相容寫法：將「第X桌」或「未排座」等字眼清洗，只保留純數字方便排序
+                let cleanTable = String(tableNum).replace(/[^0-9]/g, '') || "1";
                 localGuestsList.push({
-                    table: tableNum,
+                    table: cleanTable,
                     name: guest.name,
                     side: guest.side || '男方',
                     group: guest.group || ''
@@ -38,27 +46,25 @@ function renderExcelTable(weddingGuests) {
         });
     });
 
-    // 跟桌號 1-14 排序，方便工作人員睇
     localGuestsList.sort((a, b) => parseInt(a.table) - parseInt(b.table));
 
+    // 📌 修正：當完全沒數據時，給一條空白 Row 給用家可以直接輸入，唔好卡畫面
     if (localGuestsList.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-gray-400">目前沒有賓客數據，請點擊「新增賓客一行」</td></tr>`;
+        tbody.innerHTML = '';
+        addNewRow();
         return;
     }
 
-    // 渲染每一行 Excel
     localGuestsList.forEach((guest, index) => {
         createRowDOM(guest, index);
     });
 }
 
-// 產生單一行 Excel HTML
 function createRowDOM(guest, index) {
     const tr = document.createElement('tr');
     tr.className = "hover:bg-gray-50 transition";
     tr.id = `excel-row-${index}`;
 
-    // 桌次下拉選單 (1-14)
     let tableOptions = '';
     for(let i=1; i<=14; i++) {
         tableOptions += `<option value="${i}" ${guest.table == i ? 'selected' : ''}>${i}</option>`;
@@ -80,7 +86,7 @@ function createRowDOM(guest, index) {
             </select>
         </td>
         <td class="p-1">
-            <input type="text" value="${guest.group}" oninput="updateLocalData(${index}, 'group', this.value)" class="excel-input w-full p-1.5 bg-transparent border-0" placeholder="例如: LK / 飛機友 / 姑姐...">
+            <input type="text" value="${guest.group}" oninput="updateLocalData(${index}, 'group', this.value)" class="excel-input w-full p-1.5 bg-transparent border-0" placeholder="例如: LK / 家人...">
         </td>
         <td class="p-1 text-center">
             <button onclick="deleteRow(${index})" class="text-red-500 hover:text-red-700 font-bold text-xs p-1.5 border border-red-200 rounded bg-red-50 hover:bg-red-100 transition">
@@ -91,38 +97,30 @@ function createRowDOM(guest, index) {
     tbody.appendChild(tr);
 }
 
-// 當工作人員喺 Excel 打字時，即時紀錄落邊一格
 function updateLocalData(index, field, value) {
     if (localGuestsList[index]) {
         localGuestsList[index][field] = value.trim();
     }
 }
 
-// 新增一行 Excel
 function addNewRow() {
-    const newGuest = { table: "1", name: "", side: "男方", group: "現場排座" };
+    const newGuest = { table: "1", name: "", side: "男方", group: "" };
     localGuestsList.push(newGuest);
     const newIndex = localGuestsList.length - 1;
     createRowDOM(newGuest, newIndex);
-    
-    // 自動 focus 過去等用家可以直接打字
-    const row = document.getElementById(`excel-row-${newIndex}`);
-    if(row) row.getElementsByTagName('input')[0].focus();
 }
 
-// 刪除一行 Excel
 function deleteRow(index) {
     if (confirm("確定要刪除這位賓客嗎？(需要點擊儲存才會生效)")) {
-        document.getElementById(`excel-row-${index}`).remove();
-        localGuestsList[index] = null; // 標記為已刪除
+        const rowDOM = document.getElementById(`excel-row-${index}`);
+        if(rowDOM) rowDOM.remove();
+        localGuestsList[index] = null;
     }
 }
 
-// 💾 將 Excel 表格重新封裝成 JSON 結構並推上 Firebase
 function saveExcelToFirebase() {
     const finalWeddingGuestsJSON = {};
 
-    // 重新組裝打包
     localGuestsList.forEach(guest => {
         if (guest && guest.name) {
             const table = guest.table;
@@ -137,13 +135,62 @@ function saveExcelToFirebase() {
         }
     });
 
-    if (confirm("🚨 確定要儲存 Excel 變更並覆蓋 Firebase 嗎？前台所有手機會即時刷新。")) {
+    if (confirm("🚨 確定要儲存 Excel 變更並覆蓋 Firebase 嗎？")) {
         database.ref('wedding_guests').set(finalWeddingGuestsJSON)
-            .then(() => {
-                alert("✅ 儲存成功！Excel 名單已完美同步。");
-            })
-            .catch((error) => {
-                alert("❌ 儲存失敗: " + error.message);
-            });
+            .then(() => { alert("✅ 儲存成功！"); })
+            .catch((error) => { alert("❌ 儲存失敗: " + error.message); });
     }
+}
+
+// 📌 新增：直接解析 Google Sheets 匯出的 CSV 名單
+function handleCSVUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.split('\n');
+        if(lines.length <= 1) return;
+
+        // 解析第一行 Header 定位欄位
+        const headers = lines[0].split(',').map(h => h.trim());
+        const nameIdx = headers.indexOf("姓名");
+        const sideIdx = headers.indexOf("分類"); // 你的資料入面「男方/女方」通常放喺分類
+        const groupIdx = headers.indexOf("子分類"); 
+        const tableIdx = headers.indexOf("桌次");
+
+        if(nameIdx === -1 || tableIdx === -1) {
+            alert("❌ CSV 格式不符！必須包含『姓名』同『桌次』欄位。");
+            return;
+        }
+
+        localGuestsList = []; // 清空原有緩存
+        tbody.innerHTML = '';
+
+        // 逐行讀取賓客
+        for(let i = 1; i < lines.length; i++) {
+            if(!lines[i].trim()) continue;
+            const row = lines[i].split(',').map(r => r.trim());
+            
+            let rawTable = row[tableIdx] || "1";
+            let cleanTable = rawTable.replace(/[^0-9]/g, '') || "1"; // 將 '第1桌' 轉成 '1'
+            
+            localGuestsList.push({
+                table: cleanTable,
+                name: row[nameIdx],
+                side: sideIdx !== -1 ? (row[sideIdx] || "男方") : "男方",
+                group: groupIdx !== -1 ? (row[groupIdx] || "") : ""
+            });
+        }
+
+        // 重新排版 Excel 畫面
+        localGuestsList.sort((a, b) => parseInt(a.table) - parseInt(b.table));
+        localGuestsList.forEach((guest, index) => {
+            createRowDOM(guest, index);
+        });
+
+        alert(`📂 成功從 CSV 載入 ${localGuestsList.length} 位賓客！確認無誤後請點擊「儲存變更」推上 Firebase。`);
+    };
+    reader.readAsText(file, 'UTF-8');
 }
