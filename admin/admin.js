@@ -307,38 +307,35 @@ function handleCSVUpload(input) {
     reader.readAsText(file, 'UTF-8');
 }
 
-// 📌 強效鎖死手機雙指縮放與 Double-tap 放大 (後台)
-document.addEventListener('touchstart', function (event) {
-    if (event.touches.length > 1) {
-        event.preventDefault(); // 攔截後台雙指縮放
-    }
-}, { passive: false });
+// 📌 後台：iPhone Safari 完美鎖死雙指縮放與 Double-tap 放大
+(function() {
+    let adminLastTouchEnd = 0;
 
-let lastTouchEnd = 0;
-document.addEventListener('touchend', function (event) {
-    const now = (new Date()).getTime();
-    if (now - lastTouchEnd <= 300) {
-        event.preventDefault(); // 攔截後台連點放大
-    }
-    lastTouchEnd = now;
-}, false);
+    // 1. 攔截雙指放大手勢觸發
+    document.addEventListener('touchstart', function (event) {
+        if (event.touches.length > 1) {
+            event.preventDefault();
+        }
+    }, { passive: false });
 
-// 📌 iPhone Safari 強效鎖死手機雙指縮放與 Double-tap 放大 (後台)
-document.addEventListener('touchstart', function (event) {
-    if (event.touches.length > 1) {
+    // 2. 核心補強：攔截雙指滑動縮放 (Pinch-to-zoom 關鍵)
+    document.addEventListener('touchmove', function (event) {
+        if (event.scale !== undefined && event.scale !== 1) {
+            event.preventDefault();
+        }
+    }, { passive: false });
+
+    // 3. 攔截 iOS 專屬雙指手勢
+    document.addEventListener('gesturestart', function (event) {
         event.preventDefault();
-    }
-}, { passive: false });
+    }, { passive: false });
 
-document.addEventListener('gesturestart', function (event) {
-    event.preventDefault();
-}, { passive: false });
-
-let lastTouchEnd = 0;
-document.addEventListener('touchend', function (event) {
-    const now = (new Date()).getTime();
-    if (now - lastTouchEnd <= 300) {
-        event.preventDefault();
-    }
-    lastTouchEnd = now;
-}, false);
+    // 4. 攔截快速連點兩下 (Double-tap)
+    document.addEventListener('touchend', function (event) {
+        const now = (new Date()).getTime();
+        if (now - adminLastTouchEnd <= 300) {
+            event.preventDefault();
+        }
+        adminLastTouchEnd = now;
+    }, false);
+})();
