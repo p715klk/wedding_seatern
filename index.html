@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>婚宴即時同步帶位系統 (Eaton HK)</title>
+    <title>婚宴帶位即時同步系統 (Vanna&Michael Wedding)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -183,11 +183,10 @@
                 container.appendChild(row);
             });
 
-            // 📌 抽離出來做動態刷新標題同底部的函數
+            // 處理標題、加人掣，以及動態決定鎖定文字放邊度
             renderTableFooterAndTitle(tableNum, guests);
         }
 
-        // 📌 新增：動態處理人數與動態顯示加人掣，解決搜尋攔點擊時同步更新 Modal 嘅問題
         function renderTableFooterAndTitle(tableNum, guests) {
             let currentSeatOccupied = 0;
             guests.forEach(guest => {
@@ -200,23 +199,28 @@
             document.getElementById('modal-title').innerText = `第 ${tableNum} 桌賓客名單 (現坐 ${currentSeatOccupied}/12 位)`;
 
             const footerAction = document.getElementById('modal-footer-action');
+            const contentContainer = document.getElementById('modal-content');
+
             if (currentSeatOccupied < 12) {
-                // 📌 Bug 3 修正：不再傳入 index 參數，直接由 addNewGuestInline 即時撈取最新長度避免覆蓋
+                // 未滿人：顯示加人掣喺底，清走名單入面可能殘留嘅提示
+                footerAction.classList.remove('hidden');
                 footerAction.innerHTML = `
                     <button onclick="addNewGuestInline('${tableNum}')" class="w-full py-2.5 text-sm font-bold rounded-lg border-2 border-dashed border-red-300 text-red-700 bg-red-50 hover:bg-red-100 transition shadow-sm">
                         + 填入此桌新賓客 / 臨時帶伴 (餘下 ${12 - currentSeatOccupied} 空位)
                     </button>
                 `;
             } else {
-                footerAction.innerHTML = `
-                    <div class="w-full text-center text-xs font-bold text-gray-400 bg-gray-200/50 py-2 rounded-lg border border-dashed border-gray-300">
-                        🔒 此圍已滿 12 人 (如需加人，請先將其他賓客設為「取消」釋放座位)
-                    </div>
-                `;
+                // 📌 滿人：隱藏底部動作欄，直接將鎖定提示包進一個 div class 擺喺名單 (modal-content) 嘅最尾
+                footerAction.innerHTML = '';
+                footerAction.classList.add('hidden');
+
+                const lockRow = document.createElement('div');
+                lockRow.className = "w-full text-center text-xs font-bold text-gray-400 bg-gray-200/50 py-2.5 rounded-lg border border-dashed border-gray-300 mt-2";
+                lockRow.innerText = "🔒 此圍已滿 12 人 (如需加人，請先將其他賓客設為「取消」釋放座位)";
+                contentContainer.appendChild(lockRow);
             }
         }
 
-        // 📌 Bug 3 修正：動態獲取最新數據長度，完美防呆不覆蓋
         function addNewGuestInline(tableNum) {
             const currentGuestsArray = dbData[tableNum] || [];
             const nextIndex = currentGuestsArray.length; 
@@ -234,7 +238,6 @@
         }
 
         function cycleArrivedStatus(table, name, currentStatus) {
-            // 📌 Bug 4 修正：清洗與相容舊數據
             let sanitizedStatus = currentStatus;
             if (currentStatus === true || currentStatus === '已到') sanitizedStatus = '已到';
             else if (currentStatus === false || currentStatus === '未到') sanitizedStatus = '未到';
@@ -295,7 +298,6 @@
                         const currentGift = statusState[key]?.gift || '未交';
                         
                         const row = document.createElement('div');
-                        // 📌 Bug 1 修正：搜尋列表入面如果係取消狀態，同樣加上淡淡的加刪除線樣式
                         row.className = `p-2 rounded-lg flex justify-between items-center gap-2 border transition shadow-sm ${currentArrivedStatus === '取消' ? 'bg-red-50/40 opacity-50 line-through border-red-200' : 'bg-red-50 hover:bg-red-100 border-red-100'}`;
                         row.innerHTML = `
                             <div class="flex flex-col text-left cursor-pointer flex-1" onclick="openModalAndHighlight('${tableNum}')">
