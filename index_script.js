@@ -325,3 +325,19 @@ function openModalAndHighlight(tableNum) {
     clearSearch();
     openModal(tableNum);
 }
+
+// 📌 強效鎖死手機雙指縮放與 Double-tap 放大 (前台)
+document.addEventListener('touchstart', function (event) {
+    if (event.touches.length > 1) {
+        event.preventDefault(); // 攔截雙指縮放
+    }
+}, { passive: false });
+
+let lastTouchEnd = 0;
+document.addEventListener('touchend', function (event) {
+    const now = (new Date()).getTime();
+    if (now - lastTouchEnd <= 300) {
+        event.preventDefault(); // 攔截 300 毫秒內連點兩下
+    }
+    lastTouchEnd = now;
+}, false);
