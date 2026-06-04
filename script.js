@@ -101,8 +101,17 @@ function renderModalContent(tableNum) {
     const container = document.getElementById('modal-content');
     container.innerHTML = '';
     
-    const guests = dbData[tableNum] || [];
+    // 1. 攞到嗰張枱嘅所有賓客
+    let guests = dbData[tableNum] || [];
     
+    // 📌 核心新增：如果賓客有設定 sort 欄位，就跟 sort 數字由小到大排；冇就排最後
+    guests = [...guests].sort((a, b) => {
+        const sortA = a.sort !== undefined ? parseInt(a.sort) : 999;
+        const sortB = b.sort !== undefined ? parseInt(b.sort) : 999;
+        return sortA - sortB;
+    });
+    
+    // 2. 下面原本嘅 guests.forEach((guest, index) => { ... }) 保持完全不變
     guests.forEach((guest, index) => {
         const name = guest.name;
         const side = guest.side || "";
