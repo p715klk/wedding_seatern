@@ -3,10 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>婚宴數據後台管理 (Excel 模式)</title>
+    <title>婚宴數據後台管理 (Excel + 拖拉排序)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+
     <style>
         .excel-table th, .excel-table td {
             border: 1px solid #e2e8f0;
@@ -14,6 +17,17 @@
         .excel-input:focus {
             background-color: #f0fdf4;
             outline: 2px solid #22c55e;
+        }
+        /* 拖動時的樣式 */
+        .sortable-ghost {
+            opacity: 0.4;
+            background-color: #fef08a !important;
+        }
+        .drag-handle {
+            cursor: grab;
+        }
+        .drag-handle:active {
+            cursor: grabbing;
         }
     </style>
 </head>
@@ -23,14 +37,13 @@
         <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-gray-300 pb-4 mb-6 gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-red-700">📋 賓客名單 Excel 管理後台</h1>
-                <p class="text-xs text-gray-500 mt-1">直接修改資料，或一鍵匯入 Google Excel (CSV) 檔案</p>
+                <p class="text-xs text-gray-500 mt-1">按住 ☰ 即可上下拖拉改變排序，完成後記得點擊儲存變更</p>
             </div>
             <div class="flex flex-wrap gap-2 w-full lg:w-auto">
                 <input type="file" id="csv-file-input" accept=".csv" class="hidden" onchange="handleCSVUpload(this)">
                 <button onclick="document.getElementById('csv-file-input').click()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow transition">
                     📂 匯入 CSV 舊名單
                 </button>
-                
                 <button onclick="addNewRow()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow transition">
                     ➕ 新增賓客一行
                 </button>
@@ -44,10 +57,11 @@
         </header>
 
         <div class="bg-white rounded-xl shadow border border-gray-200 overflow-x-auto max-h-[75vh]">
-            <table class="w-full text-left border-collapse excel-table min-w-[700px]">
+            <table class="w-full text-left border-collapse excel-table min-w-[750px]">
                 <thead class="bg-gray-200 text-gray-700 sticky top-0 z-10 text-sm font-bold">
                     <tr>
-                        <th class="p-2.5 w-16 text-center bg-gray-300">桌次</th>
+                        <th class="p-2.5 w-12 text-center bg-gray-300">拖動</th> <th class="p-2.5 w-16 text-center bg-gray-300">桌次</th>
+                        <th class="p-2.5 w-20 text-center bg-gray-300">排序</th>
                         <th class="p-2.5 bg-gray-300">賓客姓名</th>
                         <th class="p-2.5 w-32 bg-gray-300">男方/女方</th>
                         <th class="p-2.5 w-48 bg-gray-300">分類 (如: LK, 家人)</th>
@@ -56,12 +70,11 @@
                 </thead>
                 <tbody id="excel-tbody" class="text-sm divide-y divide-gray-100">
                     <tr>
-                        <td colspan="5" class="p-8 text-center text-gray-400">載入 Firebase 數據中...</td>
+                        <td colspan="7" class="p-8 text-center text-gray-400">載入 Firebase 數據中...</td>
                     </tr>
                 </tbody>
             </table>
         </div>
-        <p class="text-xs text-gray-400 mt-2">💡 提示：如果 Google Sheets 頂頭欄位是「姓名, 分類, 桌次」，直接導出 CSV 匯入即可自動配對！</p>
     </div>
 
     <script src="admin.js"></script>
