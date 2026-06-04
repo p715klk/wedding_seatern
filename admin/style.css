@@ -1,0 +1,36 @@
+/* ==========================================
+   Admin Panel (Excel 表格 + 拖拉排序) 樣式
+   ========================================== */
+.excel-table th, .excel-table td {
+    border: 1px solid #e2e8f0;
+}
+
+.excel-input:focus {
+    background-color: #f0fdf4;
+    outline: 2px solid #22c55e;
+}
+
+/* 拖動時被選中那行的半透明黃色樣式 */
+.sortable-ghost {
+    opacity: 0.4;
+    background-color: #fef08a !important;
+}
+
+/* 拖拉把手的鼠標狀態 */
+.drag-handle {
+    cursor: grab;
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+/* 新增賓客橫行時的閃爍高亮動畫 */
+@keyframes highlight-new {
+    0% { background-color: #bbf7d0; }
+    100% { background-color: #ffffff; }
+}
+
+.new-row-animate {
+    animation: highlight-new 1.5s ease-out forwards;
+}
