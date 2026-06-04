@@ -1,67 +1,149 @@
-// Firebase 設定 (與 index 一致)
+// Firebase 設定
 const firebaseConfig = {
     databaseURL: "https://wedding-seatern-default-rtdb.asia-southeast1.firebasedatabase.app/" 
 };
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-const jsonTextarea = document.getElementById('json-textarea');
-let currentRawData = {};
+const tbody = document.getElementById('excel-tbody');
+let localGuestsList = []; // 用埋做本地緩存，格式：[{table: "1", name: "張三", side: "男方", group: "家人"}]
 
-// 監聽整個 Database 節點
-database.ref().on('value', (snapshot) => {
-    currentRawData = snapshot.val() || {};
+// 監聽 Firebase 數據
+database.ref('wedding_guests').on('value', (snapshot) => {
+    const weddingGuests = snapshot.val() || {};
     
-    // 如果 Firebase 還沒有任何節點，幫忙初始化結構
-    if (!currentRawData.wedding_guests) currentRawData.wedding_guests = {};
-    if (!currentRawData.guest_status) currentRawData.guest_status = {};
-
-    // 將 JSON 物件轉化為排版好、有縮排（4格空位）的字串放入 Textarea
-    // 只有在使用者沒有 focus 在裏面時才主動更新，避免打字打到一半被刷走
-    if (document.activeElement !== jsonTextarea) {
-        jsonTextarea.value = JSON.stringify(currentRawData, null, 4);
+    // 只有在工作人員沒有在打字/編輯時，才重新渲染表格，防止跳字
+    if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+        renderExcelTable(weddingGuests);
     }
 });
 
-// 一鍵複製功能
-function copyJSON() {
-    jsonTextarea.select();
-    document.execCommand('copy');
-    alert('📋 JSON 數據已成功複製到剪貼簿！');
-}
+// 將 JSON 轉成 Excel 行列
+function renderExcelTable(weddingGuests) {
+    localGuestsList = [];
+    tbody.innerHTML = '';
 
-// 儲存並覆蓋 Firebase 功能 (防呆驗證)
-function saveJSONToFirebase() {
-    const rawValue = jsonTextarea.value.trim();
-    
-    if (!rawValue) {
-        alert("❌ 錯誤：不能儲存空的數據！");
+    // 將原本按「桌號」分類的 JSON 拆開，方便好似 Excel 咁排序同加減
+    Object.keys(weddingGuests).forEach(tableNum => {
+        const guests = weddingGuests[tableNum] || [];
+        guests.forEach(guest => {
+            if (guest && guest.name) {
+                localGuestsList.push({
+                    table: tableNum,
+                    name: guest.name,
+                    side: guest.side || '男方',
+                    group: guest.group || ''
+                });
+            }
+        });
+    });
+
+    // 跟桌號 1-14 排序，方便工作人員睇
+    localGuestsList.sort((a, b) => parseInt(a.table) - parseInt(b.table));
+
+    if (localGuestsList.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-gray-400">目前沒有賓客數據，請點擊「新增賓客一行」</td></tr>`;
         return;
     }
 
-    try {
-        // 第一關：檢查是否符合 JSON 語法格式
-        const parsedData = JSON.parse(rawValue);
+    // 渲染每一行 Excel
+    localGuestsList.forEach((guest, index) => {
+        createRowDOM(guest, index);
+    });
+}
 
-        // 第二關：防呆，確保關鍵節點沒有被意外抹煞
-        if (!parsedData.hasOwnProperty('wedding_guests')) {
-            alert("❌ 儲存失敗：JSON 結構中缺少了必要的 'wedding_guests' 欄位！");
-            return;
+// 產生單一行 Excel HTML
+function createRowDOM(guest, index) {
+    const tr = document.createElement('tr');
+    tr.className = "hover:bg-gray-50 transition";
+    tr.id = `excel-row-${index}`;
+
+    // 桌次下拉選單 (1-14)
+    let tableOptions = '';
+    for(let i=1; i<=14; i++) {
+        tableOptions += `<option value="${i}" ${guest.table == i ? 'selected' : ''}>${i}</option>`;
+    }
+
+    tr.innerHTML = `
+        <td class="p-1 text-center bg-gray-50">
+            <select onchange="updateLocalData(${index}, 'table', this.value)" class="w-full text-center p-1.5 bg-transparent border-0 focus:bg-white focus:ring-1 focus:ring-green-500 font-bold text-gray-700">
+                ${tableOptions}
+            </select>
+        </td>
+        <td class="p-1">
+            <input type="text" value="${guest.name}" oninput="updateLocalData(${index}, 'name', this.value)" class="excel-input w-full p-1.5 bg-transparent border-0 font-bold text-gray-800" placeholder="輸入姓名...">
+        </td>
+        <td class="p-1">
+            <select onchange="updateLocalData(${index}, 'side', this.value)" class="w-full p-1.5 bg-transparent border-0 focus:bg-white focus:ring-1 focus:ring-green-500">
+                <option value="男方" ${guest.side === '男方' ? 'selected' : ''}>男方</option>
+                <option value="女方" ${guest.side === '女方' ? 'selected' : ''}>女方</option>
+            </select>
+        </td>
+        <td class="p-1">
+            <input type="text" value="${guest.group}" oninput="updateLocalData(${index}, 'group', this.value)" class="excel-input w-full p-1.5 bg-transparent border-0" placeholder="例如: LK / 飛機友 / 姑姐...">
+        </td>
+        <td class="p-1 text-center">
+            <button onclick="deleteRow(${index})" class="text-red-500 hover:text-red-700 font-bold text-xs p-1.5 border border-red-200 rounded bg-red-50 hover:bg-red-100 transition">
+                🗑️ 刪除
+            </button>
+        </td>
+    `;
+    tbody.appendChild(tr);
+}
+
+// 當工作人員喺 Excel 打字時，即時紀錄落邊一格
+function updateLocalData(index, field, value) {
+    if (localGuestsList[index]) {
+        localGuestsList[index][field] = value.trim();
+    }
+}
+
+// 新增一行 Excel
+function addNewRow() {
+    const newGuest = { table: "1", name: "", side: "男方", group: "現場排座" };
+    localGuestsList.push(newGuest);
+    const newIndex = localGuestsList.length - 1;
+    createRowDOM(newGuest, newIndex);
+    
+    // 自動 focus 過去等用家可以直接打字
+    const row = document.getElementById(`excel-row-${newIndex}`);
+    if(row) row.getElementsByTagName('input')[0].focus();
+}
+
+// 刪除一行 Excel
+function deleteRow(index) {
+    if (confirm("確定要刪除這位賓客嗎？(需要點擊儲存才會生效)")) {
+        document.getElementById(`excel-row-${index}`).remove();
+        localGuestsList[index] = null; // 標記為已刪除
+    }
+}
+
+// 💾 將 Excel 表格重新封裝成 JSON 結構並推上 Firebase
+function saveExcelToFirebase() {
+    const finalWeddingGuestsJSON = {};
+
+    // 重新組裝打包
+    localGuestsList.forEach(guest => {
+        if (guest && guest.name) {
+            const table = guest.table;
+            if (!finalWeddingGuestsJSON[table]) {
+                finalWeddingGuestsJSON[table] = [];
+            }
+            finalWeddingGuestsJSON[table].push({
+                name: guest.name,
+                side: guest.side,
+                group: guest.group
+            });
         }
+    });
 
-        // 確認提示
-        if (confirm("🚨 警告！此操作會直接修改或覆蓋整個 Firebase 資料庫，前台工作人員的數據會立刻同步。確定要儲存嗎？")) {
-            database.ref().set(parsedData)
-                .then(() => {
-                    alert("✅ 成功！Firebase 數據已即時同步更新。");
-                })
-                .catch((error) => {
-                    alert("❌ 寫入 Firebase 失敗: " + error.message);
-                });
-        }
-
-    } catch (e) {
-        // JSON 格式錯誤提示（例如少咗逗號、括號不對稱等）
-        alert("❌ JSON 格式有語法錯誤，請檢查！\n錯誤訊息: " + e.message);
+    if (confirm("🚨 確定要儲存 Excel 變更並覆蓋 Firebase 嗎？前台所有手機會即時刷新。")) {
+        database.ref('wedding_guests').set(finalWeddingGuestsJSON)
+            .then(() => {
+                alert("✅ 儲存成功！Excel 名單已完美同步。");
+            })
+            .catch((error) => {
+                alert("❌ 儲存失敗: " + error.message);
+            });
     }
 }
