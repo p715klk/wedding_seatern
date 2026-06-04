@@ -8,22 +8,26 @@ const database = firebase.database();
 const tbody = document.getElementById('excel-tbody');
 let localGuestsList = []; 
 
-// 監聽 Firebase 數據
+// 📌 初始化 SortableJS 拖拉功能
+Sortable.create(tbody, {
+    handle: '.drag-handle', // 只有按住 ☰ 才可以拖動，方便輸入框打字
+    animation: 150,        // 拖動動畫速度
+    ghostClass: 'sortable-ghost', // 拖動時的預覽樣式
+    onEnd: function () {
+        // 核心邏輯：當用家拖拉放手後，重新根據畫面的 DOM 順序刷新 localGuestsList 並重編 sort 數字
+        recalculateSortNumbersFromDOM();
+    }
+});
+
 database.ref('wedding_guests').on('value', (snapshot) => {
     const weddingGuests = snapshot.val();
-    
-    // 📌 修正：如果 Firebase 數據完全是空 (null)，主動給予空物件，避免卡在「載入中」
     if (!weddingGuests) {
         renderExcelTable({});
         return;
     }
-    
     if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
         renderExcelTable(weddingGuests);
     }
-}, (error) => {
-    // 📌 修正：如果是權限或連線問題，彈出提示
-    tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-red-500 font-bold">Firebase 連線失敗，請檢查權限或 Database URL！</td></tr>`;
 });
 
 function renderExcelTable(weddingGuests) {
@@ -34,10 +38,10 @@ function renderExcelTable(weddingGuests) {
         const guests = weddingGuests[tableNum] || [];
         guests.forEach(guest => {
             if (guest && guest.name) {
-                // 相容寫法：將「第X桌」或「未排座」等字眼清洗，只保留純數字方便排序
                 let cleanTable = String(tableNum).replace(/[^0-9]/g, '') || "1";
                 localGuestsList.push({
-                    table: cleanTable,
+                    table: parseInt(cleanTable),
+                    sort: guest.sort !== undefined ? parseInt(guest.sort) : 10,
                     name: guest.name,
                     side: guest.side || '男方',
                     group: guest.group || ''
@@ -46,24 +50,32 @@ function renderExcelTable(weddingGuests) {
         });
     });
 
-    localGuestsList.sort((a, b) => parseInt(a.table) - parseInt(b.table));
+    // 第一次由 Firebase 載入時，先跟枱號、再跟 sort 排序
+    sortLocalList();
 
-    // 📌 修正：當完全沒數據時，給一條空白 Row 給用家可以直接輸入，唔好卡畫面
     if (localGuestsList.length === 0) {
         tbody.innerHTML = '';
         addNewRow();
         return;
     }
 
+    refreshTableUI();
+}
+
+// 將目前的 localGuestsList 渲染上網頁畫面
+function refreshTableUI() {
+    tbody.innerHTML = '';
     localGuestsList.forEach((guest, index) => {
-        createRowDOM(guest, index);
+        if (guest) createRowDOM(guest, index);
     });
 }
 
 function createRowDOM(guest, index) {
     const tr = document.createElement('tr');
-    tr.className = "hover:bg-gray-50 transition";
+    tr.className = "hover:bg-gray-50 transition bg-white";
     tr.id = `excel-row-${index}`;
+    // 儲存目前在陣列的 index 方便追蹤
+    tr.setAttribute('data-index', index); 
 
     let tableOptions = '';
     for(let i=1; i<=14; i++) {
@@ -71,10 +83,15 @@ function createRowDOM(guest, index) {
     }
 
     tr.innerHTML = `
+        <td class="p-2 text-center bg-gray-50 text-gray-400 drag-handle text-base font-bold">☰</td>
+        
         <td class="p-1 text-center bg-gray-50">
-            <select onchange="updateLocalData(${index}, 'table', this.value)" class="w-full text-center p-1.5 bg-transparent border-0 focus:bg-white focus:ring-1 focus:ring-green-500 font-bold text-gray-700">
+            <select onchange="updateLocalData(${index}, 'table', this.value); onTableChange();" class="w-full text-center p-1.5 bg-transparent border-0 focus:bg-white focus:ring-1 focus:ring-green-500 font-bold text-gray-700 table-select">
                 ${tableOptions}
             </select>
+        </td>
+        <td class="p-1 text-center bg-gray-50">
+            <input type="number" value="${guest.sort}" readonly class="sort-input w-full p-1.5 bg-transparent border-0 text-center font-mono text-gray-400 font-bold" placeholder="10">
         </td>
         <td class="p-1">
             <input type="text" value="${guest.name}" oninput="updateLocalData(${index}, 'name', this.value)" class="excel-input w-full p-1.5 bg-transparent border-0 font-bold text-gray-800" placeholder="輸入姓名...">
@@ -99,22 +116,74 @@ function createRowDOM(guest, index) {
 
 function updateLocalData(index, field, value) {
     if (localGuestsList[index]) {
-        localGuestsList[index][field] = value.trim();
+        localGuestsList[index][field] = (field === 'sort' || field === 'table') ? parseInt(value) || 0 : value.trim();
     }
 }
 
+// 📌 當用家手動改咗某個人嘅「桌次」，我哋自動重新編排兼排序，等同枱嘅人聚返埋一齊
+function onTableChange() {
+    recalculateSortNumbersFromDOM();
+    sortLocalList();
+    refreshTableUI();
+}
+
+// 📌 核心重編：跟據目前畫面的 DOM 行列次序，重新洗牌每一桌內部的 sort 權重數字
+function recalculateSortNumbersFromDOM() {
+    const rows = tbody.querySelectorAll('tr');
+    const tableCounters = {}; // 用來記錄每張枱目前數到第幾個人
+
+    const updatedList = [];
+
+    rows.forEach(row => {
+        const oldIndex = row.getAttribute('data-index');
+        const guest = localGuestsList[oldIndex];
+        
+        if (guest) {
+            // 攞返目前呢行畫面上選取嘅桌次
+            const currentTable = parseInt(row.querySelector('.table-select').value) || 1;
+            guest.table = currentTable;
+
+            // 初始化或累加該桌人數計數器
+            if (!tableCounters[currentTable]) tableCounters[currentTable] = 1;
+            else tableCounters[currentTable]++;
+
+            // 重新賦予 sort 數字：1, 2, 3...
+            guest.sort = tableCounters[currentTable];
+            
+            // 即時更新畫面上的唯讀數字輸入框
+            row.querySelector('.sort-input').value = guest.sort;
+
+            updatedList.push(guest);
+        }
+    });
+
+    // 將網頁上看到的順序，寫回背後的暫存記憶體
+    localGuestsList = updatedList;
+    // 重新綁定 index，確保打字更新不會錯位
+    rows.forEach((row, newIdx) => {
+        row.setAttribute('data-index', newIdx);
+    });
+}
+
+function sortLocalList() {
+    localGuestsList.sort((a, b) => {
+        if (a.table !== b.table) return a.table - b.table;
+        return a.sort - b.sort;
+    });
+}
+
 function addNewRow() {
-    const newGuest = { table: "1", name: "", side: "男方", group: "" };
+    const newGuest = { table: 1, sort: 99, name: "", side: "男方", group: "" };
     localGuestsList.push(newGuest);
-    const newIndex = localGuestsList.length - 1;
-    createRowDOM(newGuest, newIndex);
+    refreshTableUI();
+    recalculateSortNumbersFromDOM();
 }
 
 function deleteRow(index) {
     if (confirm("確定要刪除這位賓客嗎？(需要點擊儲存才會生效)")) {
-        const rowDOM = document.getElementById(`excel-row-${index}`);
-        if(rowDOM) rowDOM.remove();
         localGuestsList[index] = null;
+        recalculateSortNumbersFromDOM();
+        refreshTableUI();
     }
 }
 
@@ -130,19 +199,20 @@ function saveExcelToFirebase() {
             finalWeddingGuestsJSON[table].push({
                 name: guest.name,
                 side: guest.side,
-                group: guest.group
+                group: guest.group,
+                sort: guest.sort
             });
         }
     });
 
     if (confirm("🚨 確定要儲存 Excel 變更並覆蓋 Firebase 嗎？")) {
         database.ref('wedding_guests').set(finalWeddingGuestsJSON)
-            .then(() => { alert("✅ 儲存成功！"); })
+            .then(() => { alert("✅ 儲存成功！拖拉排序已完美同步。"); })
             .catch((error) => { alert("❌ 儲存失敗: " + error.message); });
     }
 }
 
-// 📌 新增：直接解析 Google Sheets 匯出的 CSV 名單
+// CSV 匯入也支援自動重編排序
 function handleCSVUpload(input) {
     const file = input.files[0];
     if (!file) return;
@@ -153,10 +223,9 @@ function handleCSVUpload(input) {
         const lines = text.split('\n');
         if(lines.length <= 1) return;
 
-        // 解析第一行 Header 定位欄位
         const headers = lines[0].split(',').map(h => h.trim());
         const nameIdx = headers.indexOf("姓名");
-        const sideIdx = headers.indexOf("分類"); // 你的資料入面「男方/女方」通常放喺分類
+        const sideIdx = headers.indexOf("分類"); 
         const groupIdx = headers.indexOf("子分類"); 
         const tableIdx = headers.indexOf("桌次");
 
@@ -165,32 +234,26 @@ function handleCSVUpload(input) {
             return;
         }
 
-        localGuestsList = []; // 清空原有緩存
-        tbody.innerHTML = '';
-
-        // 逐行讀取賓客
+        localGuestsList = [];
         for(let i = 1; i < lines.length; i++) {
             if(!lines[i].trim()) continue;
             const row = lines[i].split(',').map(r => r.trim());
-            
-            let rawTable = row[tableIdx] || "1";
-            let cleanTable = rawTable.replace(/[^0-9]/g, '') || "1"; // 將 '第1桌' 轉成 '1'
+            let cleanTable = row[tableIdx].replace(/[^0-9]/g, '') || "1";
             
             localGuestsList.push({
-                table: cleanTable,
+                table: parseInt(cleanTable),
+                sort: 99, // 暫代
                 name: row[nameIdx],
                 side: sideIdx !== -1 ? (row[sideIdx] || "男方") : "男方",
                 group: groupIdx !== -1 ? (row[groupIdx] || "") : ""
             });
         }
 
-        // 重新排版 Excel 畫面
-        localGuestsList.sort((a, b) => parseInt(a.table) - parseInt(b.table));
-        localGuestsList.forEach((guest, index) => {
-            createRowDOM(guest, index);
-        });
+        sortLocalList();
+        refreshTableUI();
+        recalculateSortNumbersFromDOM(); // 全自動賦予 1, 2, 3...
 
-        alert(`📂 成功從 CSV 載入 ${localGuestsList.length} 位賓客！確認無誤後請點擊「儲存變更」推上 Firebase。`);
+        alert(`📂 成功從 CSV 載入 ${localGuestsList.length} 位賓客！確認無誤後請點擊「儲存變更」。`);
     };
     reader.readAsText(file, 'UTF-8');
 }
