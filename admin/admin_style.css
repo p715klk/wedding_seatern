@@ -34,3 +34,17 @@
 .new-row-animate {
     animation: highlight-new 1.5s ease-out forwards;
 }
+
+/* 📌 透過 CSS 限制觸控行為與打字放大 */
+html, body {
+    /* 限制整個網頁的觸控縮放行為 */
+    touch-action: manipulation;
+}
+
+/* iOS Safari 規定：手機畫面中，輸入框字體如果小於 16px，點擊時會全自動強制放大畫面 */
+/* 為了防止這個行為，我們在手機版將所有 input 和 select 強制改為 16px */
+@media screen and (max-width: 768px) {
+    input, select, textarea, .excel-input, .table-select {
+        font-size: 16px !important;
+    }
+}
