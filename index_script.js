@@ -130,7 +130,7 @@ function renderModalContent(tableNum) {
             <div class="flex flex-col flex-1 text-left">
                 <span class="font-bold text-gray-800 ${isJwsRow ? 'text-gray-500 text-sm pl-3 italic' : ''}">${name}</span>
                 <div class="flex gap-1 mt-1">
-                    <span class="px-2 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-700">${side}</span>
+                    <span class="px-2 py-0.5 rounded text-xs font-bold ${side === '女方' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}">${side}</span>
                     <span class="px-2 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-700">${group}</span>
                 </div>
             </div>
@@ -265,7 +265,7 @@ function handleSearch() {
                         <span class="font-bold text-gray-800">${name}</span>
                         <span class="text-xs text-red-700 font-medium mt-1">
                             第 ${tableNum} 桌 • 
-                            <span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-xs font-bold">${side}</span>
+                            <span class="px-1.5 py-0.5 rounded text-xs font-bold ${side === '女方' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}">${side}</span>
                             <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-xs font-bold">${group}</span>
                         </span>
                     </div>
