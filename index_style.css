@@ -5,4 +5,14 @@ body {
     user-select: none;         /* 防呆：禁止現場工作人員不小心反白選取文字 */
 }
 
-/* 如果日後想加自訂的 CSS 樣式，可以全部寫喺呢度 */
+/* 限制全網頁觸控行為 */
+html, body {
+    touch-action: manipulation;
+}
+
+/* 🚨 鎖死 iPhone 點擊輸入框自動放大 */
+@media screen and (max-width: 768px) {
+    input, select, textarea, .excel-input, .table-select {
+        font-size: 16px !important;
+    }
+}
