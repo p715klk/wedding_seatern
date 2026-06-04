@@ -9,33 +9,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
-    <style>
-        .excel-table th, .excel-table td {
-            border: 1px solid #e2e8f0;
-        }
-        .excel-input:focus {
-            background-color: #f0fdf4;
-            outline: 2px solid #22c55e;
-        }
-        .sortable-ghost {
-            opacity: 0.4;
-            background-color: #fef08a !important;
-        }
-        .drag-handle {
-            cursor: grab;
-        }
-        .drag-handle:active {
-            cursor: grabbing;
-        }
-        /* 新增行的高亮動畫 */
-        @keyframes highlight-new {
-            0% { background-color: #bbf7d0; }
-            100% { background-color: #ffffff; }
-        }
-        .new-row-animate {
-            animation: highlight-new 1.5s ease-out forwards;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans p-4 sm:p-6 overflow-x-hidden">
 
