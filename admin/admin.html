@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>婚宴數據後台管理 (Admin Panel)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans p-6">
+
+    <div class="max-w-4xl mx-auto">
+        <header class="flex justify-between items-center border-b border-gray-700 pb-4 mb-6">
+            <div>
+                <h1 class="text-2xl font-bold text-red-400">Wedding JSON 後台管理器</h1>
+                <p class="text-xs text-gray-400 mt-1">即時同步 Firebase 全域數據 (wedding_guests & guest_status)</p>
+            </div>
+            <a href="index.html" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold shadow transition">
+                ⬅️ 返回前台平面圖
+            </a>
+        </header>
+
+        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-lg">
+            <div class="flex justify-between items-center mb-3">
+                <span class="text-sm font-semibold text-gray-300">Firebase 即時原始數據 (JSON 格式)</span>
+                <div class="flex gap-2">
+                    <button onclick="copyJSON()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-xs font-bold transition">
+                        📋 複製 JSON
+                    </button>
+                    <button onclick="saveJSONToFirebase()" class="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded text-xs font-black tracking-wider transition shadow-md">
+                        💾 儲存並覆蓋 Firebase
+                    </button>
+                </div>
+            </div>
+
+            <textarea id="json-textarea" class="w-full h-[65vh] bg-gray-950 text-green-400 font-mono p-4 rounded-lg border border-gray-800 focus:outline-none focus:border-green-600 text-sm leading-relaxed" placeholder="載入 Firebase 數據中..."></textarea>
+            
+            <p class="text-xs text-gray-500 mt-2">
+                ⚠️ 提示：修改時必須維持標準 JSON 格式。點擊「儲存」會即時更新前台所有人看見的畫面，請小心操作。
+            </p>
+        </div>
+    </div>
+
+    <script src="admin.js"></script>
+</body>
+</html>
