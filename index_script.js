@@ -326,41 +326,35 @@ function openModalAndHighlight(tableNum) {
     openModal(tableNum);
 }
 
-// 📌 強效鎖死手機雙指縮放與 Double-tap 放大 (前台)
-document.addEventListener('touchstart', function (event) {
-    if (event.touches.length > 1) {
-        event.preventDefault(); // 攔截雙指縮放
-    }
-}, { passive: false });
+// 📌 前台：iPhone Safari 完美鎖死雙指縮放與 Double-tap 放大
+(function() {
+    let indexLastTouchEnd = 0;
 
-let lastTouchEnd = 0;
-document.addEventListener('touchend', function (event) {
-    const now = (new Date()).getTime();
-    if (now - lastTouchEnd <= 300) {
-        event.preventDefault(); // 攔截 300 毫秒內連點兩下
-    }
-    lastTouchEnd = now;
-}, false);
+    // 1. 攔截雙指放大手勢觸發
+    document.addEventListener('touchstart', function (event) {
+        if (event.touches.length > 1) {
+            event.preventDefault();
+        }
+    }, { passive: false });
 
-// 📌 iPhone Safari 強效鎖死手機雙指縮放與 Double-tap 放大
-// 攔截雙指 Pinch 手勢
-document.addEventListener('touchstart', function (event) {
-    if (event.touches.length > 1) {
+    // 2. 核心補強：攔截雙指滑動縮放 (Pinch-to-zoom 關鍵)
+    document.addEventListener('touchmove', function (event) {
+        if (event.scale !== undefined && event.scale !== 1) {
+            event.preventDefault();
+        }
+    }, { passive: false });
+
+    // 3. 攔截 iOS 專屬雙指手勢
+    document.addEventListener('gesturestart', function (event) {
         event.preventDefault();
-    }
-}, { passive: false });
+    }, { passive: false });
 
-// 攔截 iOS 專屬雙指放大手勢
-document.addEventListener('gesturestart', function (event) {
-    event.preventDefault();
-}, { passive: false });
-
-// 攔截 300 毫秒內快速連點兩下 (Double-tap) 
-let lastTouchEnd = 0;
-document.addEventListener('touchend', function (event) {
-    const now = (new Date()).getTime();
-    if (now - lastTouchEnd <= 300) {
-        event.preventDefault();
-    }
-    lastTouchEnd = now;
-}, false);
+    // 4. 攔截快速連點兩下 (Double-tap)
+    document.addEventListener('touchend', function (event) {
+        const now = (new Date()).getTime();
+        if (now - indexLastTouchEnd <= 300) {
+            event.preventDefault();
+        }
+        indexLastTouchEnd = now;
+    }, false);
+})();
