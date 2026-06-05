@@ -327,3 +327,17 @@ function handleCSVUpload(input) {
         adminLastTouchEnd = now;
     }, false);
 })();
+
+// 🔒 阻擋右鍵選單
+document.addEventListener('contextmenu', event => event.preventDefault());
+
+// 🔒 阻擋常用開發者工具快捷鍵 (F12, Ctrl+Shift+I, Ctrl+Shift+C, Ctrl+U 睇 Source)
+document.addEventListener('keydown', event => {
+    if (
+        event.key === 'F12' ||
+        (event.ctrlKey && event.shiftKey && (event.key === 'I' || event.key === 'C' || event.key === 'J')) ||
+        (event.ctrlKey && event.key === 'u')
+    ) {
+        event.preventDefault();
+    }
+});
