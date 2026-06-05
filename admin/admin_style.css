@@ -39,6 +39,10 @@
 html, body {
     /* 限制整個網頁的觸控縮放行為 */
     touch-action: manipulation;
+    -webkit-user-select: none; /* Safari */
+    -moz-user-select: none;    /* Firefox */
+    -ms-user-select: none;     /* IE10+ */
+    user-select: none;         /* 標準 */
 }
 
 /* iOS Safari 規定：手機畫面中，輸入框字體如果小於 16px，點擊時會全自動強制放大畫面 */
