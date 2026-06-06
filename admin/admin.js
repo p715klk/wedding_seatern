@@ -9,8 +9,13 @@ const tbody = document.getElementById('excel-tbody');
 const scrollContainer = document.getElementById('table-scroll-container');
 let localGuestsList = []; 
 
+// 🌟 全局維護的分類清單（會隨數據載入、CSV匯入或手動新增自動動態擴充）
+let currentCategories = ['LK', '家人', '男方親戚', '女方親戚', '中學同學'];
+let activeSelectElement = null; // 紀錄目前係邊一行的下拉選單想新增自訂分類
+let sortableInstance = null;    // 儲存 Sortable 實例
+
 // 初始化 SortableJS
-Sortable.create(tbody, {
+sortableInstance = Sortable.create(tbody, {
     handle: '.drag-handle',
     animation: 150,
     ghostClass: 'sortable-ghost',
@@ -39,12 +44,19 @@ function renderExcelTable(weddingGuests) {
         guests.forEach(guest => {
             if (guest && guest.name) {
                 let cleanTable = String(tableNum).replace(/[^0-9]/g, '') || "1";
+                let savedGroup = (guest.group || '').trim();
+                
+                // 🌟 自動收集 Firebase 原本存有但不在預設清單入面的自訂分類
+                if (savedGroup && !currentCategories.includes(savedGroup)) {
+                    currentCategories.push(savedGroup);
+                }
+
                 localGuestsList.push({
                     table: parseInt(cleanTable),
                     sort: guest.sort !== undefined ? parseInt(guest.sort) : 10,
                     name: guest.name,
                     side: guest.side || '男方',
-                    group: guest.group || ''
+                    group: savedGroup
                 });
             }
         });
@@ -66,6 +78,8 @@ function refreshTableUI() {
     localGuestsList.forEach((guest, index) => {
         if (guest) createRowDOM(guest, index);
     });
+    // 🌟 每次刷新 UI 後，檢查需唔需要套用現有的搜尋關鍵字
+    filterGuests();
 }
 
 function createRowDOM(guest, index) {
@@ -79,6 +93,12 @@ function createRowDOM(guest, index) {
         tableOptions += `<option value="${i}" ${guest.table == i ? 'selected' : ''}>${i}</option>`;
     }
 
+    // 🌟 動態生成分類下拉選單的 Option
+    let categoryOptions = '';
+    currentCategories.forEach(cat => {
+        categoryOptions += `<option value="${cat}" ${guest.group === cat ? 'selected' : ''}>${cat}</option>`;
+    });
+
     tr.innerHTML = `
         <td class="p-2 text-center bg-gray-50 text-gray-400 drag-handle text-base font-bold">☰</td>
         <td class="p-1 text-center bg-gray-50">
@@ -90,16 +110,19 @@ function createRowDOM(guest, index) {
             <input type="number" value="${guest.sort}" readonly class="sort-input w-full p-1.5 bg-transparent border-0 text-center font-mono text-gray-400 font-bold" placeholder="10">
         </td>
         <td class="p-1">
-            <input type="text" value="${guest.name}" oninput="updateLocalData(${index}, 'name', this.value)" class="excel-input w-full p-1.5 bg-transparent border-0 font-bold text-gray-800" placeholder="輸入姓名...">
+            <input type="text" value="${guest.name}" oninput="updateLocalData(${index}, 'name', this.value)" class="excel-input w-full p-1.5 bg-transparent border-0 font-bold text-gray-800 guest-name-input" placeholder="輸入姓名...">
         </td>
         <td class="p-1">
-            <select onchange="updateLocalData(${index}, 'side', this.value)" class="w-full p-1.5 bg-transparent border-0 focus:bg-white focus:ring-1 focus:ring-green-500">
+            <select onchange="updateLocalData(${index}, 'side', this.value)" class="w-full p-1.5 bg-transparent border-0 focus:bg-white focus:ring-1 focus:ring-green-500 shadow-none">
                 <option value="男方" ${guest.side === '男方' ? 'selected' : ''}>男方</option>
                 <option value="女方" ${guest.side === '女方' ? 'selected' : ''}>女方</option>
             </select>
         </td>
         <td class="p-1">
-            <input type="text" value="${guest.group}" oninput="updateLocalData(${index}, 'group', this.value)" class="excel-input w-full p-1.5 bg-transparent border-0" placeholder="例如: LK / 家人...">
+            <select onchange="handleCategoryChange(this, ${index})" class="category-select w-full p-1.5 bg-transparent border-0 focus:bg-white focus:ring-1 focus:ring-green-500">
+                ${categoryOptions}
+                <option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>
+            </select>
         </td>
         <td class="p-1 text-center">
             <button onclick="deleteRow(${index})" class="text-red-500 hover:text-red-700 font-bold text-xs p-1.5 border border-red-200 rounded bg-red-50 hover:bg-red-100 transition">
@@ -159,7 +182,7 @@ function sortLocalList() {
 }
 
 function addNewRow() {
-    const newGuest = { table: 14, sort: 99, name: "", side: "男方", group: "" }; 
+    const newGuest = { table: 14, sort: 99, name: "", side: "男方", group: currentCategories[0] || "" }; 
     localGuestsList.push(newGuest);
     
     const newIndex = localGuestsList.length - 1;
@@ -172,7 +195,7 @@ function addNewRow() {
         if(scrollContainer) {
             scrollContainer.scrollTop = scrollContainer.scrollHeight;
         }
-        newRowDOM.querySelector('input[type="text"]').focus();
+        newRowDOM.querySelector('.guest-name-input').focus();
     }, 50);
 }
 
@@ -182,6 +205,98 @@ function deleteRow(index) {
         recalculateSortNumbersFromDOM();
         refreshTableUI();
     }
+}
+
+// 🌟 功能 1：本地動態搜尋篩選（姓名、桌次、分類同步搜尋）
+function filterGuests() {
+    const searchInput = document.getElementById('guest-search-input');
+    if (!searchInput) return;
+
+    const keyword = searchInput.value.trim().toLowerCase();
+    const rows = tbody.querySelectorAll('tr');
+
+    // 安全防禦：如果正在搜尋，就暫停 Sortable 拖拉功能以免排序混亂；清空搜尋後恢復
+    if (sortableInstance) {
+        sortableInstance.option("disabled", keyword !== "");
+    }
+
+    rows.forEach(row => {
+        const oldIndex = row.getAttribute('data-index');
+        const guest = localGuestsList[oldIndex];
+        if (!guest) return;
+
+        const name = (guest.name || '').toLowerCase();
+        const tableNum = String(guest.table);
+        const group = (guest.group || '').toLowerCase();
+
+        if (name.includes(keyword) || tableNum.includes(keyword) || group.includes(keyword)) {
+            row.style.display = "";
+        } else {
+            row.style.display = "none";
+        }
+    });
+}
+
+// 🌟 功能 2：處理下拉選單點擊「+ 新增自訂...」
+function handleCategoryChange(selectObj, index) {
+    if (selectObj.value === "__NEW__") {
+        activeSelectElement = selectObj;
+        document.getElementById('custom-category-input').value = "";
+        document.getElementById('custom-dialog-overlay').classList.remove('hidden');
+        document.getElementById('custom-category-input').focus();
+    } else {
+        // 正常切換現有選項，即時同步去 local 變數
+        updateLocalData(index, 'group', selectObj.value);
+    }
+}
+
+// 🌟 功能 2：關閉並確認自訂分類彈窗
+function closeCustomCategoryDialog(isConfirm) {
+    const overlay = document.getElementById('custom-dialog-overlay');
+    overlay.classList.add('hidden');
+    
+    if (isConfirm && activeSelectElement) {
+        const newCat = document.getElementById('custom-category-input').value.trim();
+        const rowIndex = activeSelectElement.closest('tr').getAttribute('data-index');
+
+        if (newCat && !currentCategories.includes(newCat)) {
+            currentCategories.push(newCat);
+            
+            // 刷新全站所有表格行嘅下拉選單 Options，等其餘每行都能直接選取新分類
+            document.querySelectorAll('.category-select').forEach((select, idx) => {
+                const currentVal = select.value;
+                let optionsStr = "";
+                currentCategories.forEach(c => {
+                    optionsStr += `<option value="${c}">${c}</option>`;
+                });
+                optionsStr += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>`;
+                select.innerHTML = optionsStr;
+                
+                // 還原或者設定當前選取值
+                if (select === activeSelectElement) {
+                    select.value = newCat;
+                    updateLocalData(rowIndex, 'group', newCat);
+                } else {
+                    // 其餘行維持不變
+                    const otherRowIdx = select.closest('tr').getAttribute('data-index');
+                    if (localGuestsList[otherRowIdx]) {
+                        select.value = localGuestsList[otherRowIdx].group || currentCategories[0];
+                    }
+                }
+            });
+        } else if (newCat && currentCategories.includes(newCat)) {
+            // 如果輸入了已存在的分類，直接幫佢選取
+            activeSelectElement.value = newCat;
+            updateLocalData(rowIndex, 'group', newCat);
+        } else {
+            // 如果留空取消，打回原形
+            activeSelectElement.value = localGuestsList[rowIndex].group || currentCategories[0];
+        }
+    } else if (activeSelectElement) {
+        const rowIndex = activeSelectElement.closest('tr').getAttribute('data-index');
+        activeSelectElement.value = localGuestsList[rowIndex].group || currentCategories[0];
+    }
+    activeSelectElement = null;
 }
 
 function saveExcelToFirebase() {
@@ -274,13 +389,19 @@ function handleCSVUpload(input) {
             if(!lines[i].trim()) continue;
             const row = lines[i].split(',').map(r => r.trim());
             let cleanTable = row[tableIdx].replace(/[^0-9]/g, '') || "1";
+            let importedGroup = groupIdx !== -1 ? (row[groupIdx] || "") : "";
+            
+            // 🌟 如果 CSV 內帶有新的分類，立刻納入下拉選單備用池
+            if (importedGroup && !currentCategories.includes(importedGroup)) {
+                currentCategories.push(importedGroup);
+            }
             
             localGuestsList.push({
                 table: parseInt(cleanTable),
                 sort: 99, 
                 name: row[nameIdx],
                 side: sideIdx !== -1 ? (row[sideIdx] || "男方") : "男方",
-                group: groupIdx !== -1 ? (row[groupIdx] || "") : ""
+                group: importedGroup
             });
         }
 
@@ -299,26 +420,22 @@ function handleCSVUpload(input) {
 (function() {
     let adminLastTouchEnd = 0;
 
-    // 1. 攔截雙指放大手勢觸發
     document.addEventListener('touchstart', function (event) {
         if (event.touches.length > 1) {
             event.preventDefault();
         }
     }, { passive: false });
 
-    // 2. 安全檢查：避免在非 Safari 瀏覽器環境報錯 (修復關鍵)
     document.addEventListener('touchmove', function (event) {
         if (event.scale !== undefined && event.scale !== 1) {
             event.preventDefault();
         }
     }, { passive: false });
 
-    // 3. 攔截 iOS 專屬雙指手勢
     document.addEventListener('gesturestart', function (event) {
         event.preventDefault();
     }, { passive: false });
 
-    // 4. 攔截快速連點兩下
     document.addEventListener('touchend', function (event) {
         const now = (new Date()).getTime();
         if (now - adminLastTouchEnd <= 300) {
