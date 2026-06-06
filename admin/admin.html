@@ -14,14 +14,14 @@
 <body class="bg-gray-100 text-gray-800 font-sans p-4 sm:p-6 overflow-x-hidden">
 
     <div class="max-w-6xl mx-auto">
-        <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-300 pb-4 mb-6 gap-4">
+        <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-300 pb-4 mb-4 gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-red-700">📋 賓客名單 Excel 管理後台</h1>
                 <p class="text-xs text-gray-500 mt-1">按住 ☰ 即可上下拖拉改變排序，完成後記得點擊儲存變更</p>
             </div>
             <div class="flex gap-2 w-full sm:w-auto justify-end">
                 <button onclick="addNewRow()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow transition">
-                    ➕ 新增賓客一行
+                    ➕ 新增賓客
                 </button>
                 <button onclick="saveExcelToFirebase()" class="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg text-sm font-black tracking-wider shadow transition">
                     💾 儲存變更
@@ -37,6 +37,17 @@
             </div>
         </header>
 
+        <div class="bg-white p-3 rounded-xl border border-gray-200 shadow-sm mb-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="relative w-full sm:w-72">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">🔍</span>
+                <input type="text" id="guest-search-input" oninput="filterGuests()" placeholder="搜尋賓客姓名 / 桌次 / 分類..." 
+                       class="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:bg-white transition">
+            </div>
+            <div class="text-xs text-gray-400 w-full sm:w-auto text-right">
+                💡 提示：排序功能僅在「未進行搜尋」時有效
+            </div>
+        </div>
+
         <div id="table-scroll-container" class="bg-white rounded-xl shadow border border-gray-200 overflow-x-auto max-h-[72vh] scroll-smooth">
             <table class="w-full text-left border-collapse excel-table min-w-[750px]">
                 <thead class="bg-gray-200 text-gray-700 sticky top-0 z-10 text-sm font-bold">
@@ -46,7 +57,7 @@
                         <th class="p-2.5 w-20 text-center bg-gray-300">排序</th>
                         <th class="p-2.5 bg-gray-300">賓客姓名</th>
                         <th class="p-2.5 w-32 bg-gray-300">男方/女方</th>
-                        <th class="p-2.5 w-48 bg-gray-300">分類 (如: LK, 家人)</th>
+                        <th class="p-2.5 w-56 bg-gray-300">分類 (如: LK, 家人)</th>
                         <th class="p-2.5 w-24 text-center bg-gray-300">操作</th>
                     </tr>
                 </thead>
@@ -91,6 +102,18 @@
             
             <div class="text-center text-xs text-gray-500 border-t border-gray-700 pt-4">
                 Wedding Guest Manager Panel v2.0
+            </div>
+        </div>
+    </div>
+
+    <div id="custom-dialog-overlay" class="fixed inset-0 bg-black/50 z-[9999] hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-gray-100">
+            <h3 class="text-base font-bold text-gray-900 mb-2">➕ 新增自訂分類</h3>
+            <p class="text-xs text-gray-500 mb-4">請輸入你想新增的分類名稱（例如：中學同學）：</p>
+            <input type="text" id="custom-category-input" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 mb-4">
+            <div class="flex justify-end gap-2">
+                <button onclick="closeCustomCategoryDialog(false)" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold transition">取消</button>
+                <button onclick="closeCustomCategoryDialog(true)" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition">確定新增</button>
             </div>
         </div>
     </div>
