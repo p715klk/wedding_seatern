@@ -237,10 +237,41 @@ function filterGuests() {
     });
 }
 
-// 🌟 功能 2：處理下拉選單點擊「+ 新增自訂...」
+// 🌟 功能 2：處理下拉選單點擊「+ 新增自訂...」與刪除管理
 function handleCategoryChange(selectObj, index) {
     if (selectObj.value === "__NEW__") {
         activeSelectElement = selectObj;
+        
+        // 1. 動態組裝「現有分類清單」，附帶刪除按鈕
+        let listHtml = "";
+        currentCategories.forEach(cat => {
+            listHtml += `
+                <div class="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-200 text-sm">
+                    <span class="font-medium text-gray-700">${cat}</span>
+                    <button type="button" onclick="deleteCategoryFromPool('${cat}')" class="text-red-500 hover:text-red-700 font-bold text-xs px-1.5 py-0.5 hover:bg-red-50 rounded transition">
+                        🗑️ 刪除
+                    </button>
+                </div>
+            `;
+        });
+        
+        // 2. 注入到 HTML 的對話框中（在輸入框上方顯示現有分類）
+        const hintSelector = document.getElementById('custom-dialog-overlay').querySelector('p');
+        
+        // 移除舊的動態管理區（防止重複疊加）
+        const oldManager = document.getElementById('category-manager-pool');
+        if (oldManager) oldManager.remove();
+        
+        // 建立新管理區
+        const managerDiv = document.createElement('div');
+        managerDiv.id = "category-manager-pool";
+        managerDiv.className = "space-y-1.5 max-h-32 overflow-y-auto mb-4 border-t border-b border-gray-100 py-2";
+        managerDiv.innerHTML = `<p class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">現有分類管理 (可在此刪除打錯的字)：</p>` + listHtml;
+        
+        // 插在提示文字與輸入框中間
+        hintSelector.parentNode.insertBefore(managerDiv, document.getElementById('custom-category-input'));
+
+        // 清空輸入框並彈窗
         document.getElementById('custom-category-input').value = "";
         document.getElementById('custom-dialog-overlay').classList.remove('hidden');
         document.getElementById('custom-category-input').focus();
@@ -250,51 +281,102 @@ function handleCategoryChange(selectObj, index) {
     }
 }
 
-// 🌟 功能 2：關閉並確認自訂分類彈窗
+// 🌟 升級功能：專門用來刪除打錯字的分類
+function deleteCategoryFromPool(catToDelete) {
+    // 預設的基礎分類不給刪除，防止清空
+    const defaultCats = ['LK', '家人', '男方親戚', '女方親戚', '中學同學'];
+    if (defaultCats.includes(catToDelete) && !confirm(`⚠️ 「${catToDelete}」是預設分類，確定要強行刪除嗎？`)) {
+        return;
+    }
+
+    if (confirm(`確定要將「${catToDelete}」從分類選項中完全刪除嗎？\n(原本已選取此分類的賓客會自動退回第一個預設分類)`)) {
+        // 1. 從全局陣列中移除
+        currentCategories = currentCategories.filter(c => c !== catToDelete);
+        
+        // 2. 遍歷所有賓客數據，如果有人用緊呢個被刪除嘅分類，幫佢打回原形（轉去第一個分類）
+        localGuestsList.forEach(guest => {
+            if (guest && guest.group === catToDelete) {
+                guest.group = currentCategories[0] || "";
+            }
+        });
+        
+        // 3. 即時刷新彈窗內嘅管理列表
+        let listHtml = "";
+        currentCategories.forEach(cat => {
+            listHtml += `
+                <div class="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-200 text-sm">
+                    <span class="font-medium text-gray-700">${cat}</span>
+                    <button type="button" onclick="deleteCategoryFromPool('${cat}')" class="text-red-500 hover:text-red-700 font-bold text-xs px-1.5 py-0.5 hover:bg-red-50 rounded transition">
+                        🗑️ 刪除
+                    </button>
+                </div>
+            `;
+        });
+        document.getElementById('category-manager-pool').innerHTML = `<p class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">現有分類管理 (可在此刪除打錯的字)：</p>` + listHtml;
+        
+        // 4. 全局刷新全站所有 Select 下拉選單
+        updateAllSelectElements();
+    }
+}
+
+// 🌟 升級功能：抽離出來的刷新全站 Select 機制
+function updateAllSelectElements() {
+    document.querySelectorAll('.category-select').forEach((select) => {
+        const tr = select.closest('tr');
+        if (!tr) return;
+        const rowIndex = tr.getAttribute('data-index');
+        
+        let optionsStr = "";
+        currentCategories.forEach(c => {
+            optionsStr += `<option value="${c}">${c}</option>`;
+        });
+        optionsStr += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>`;
+        select.innerHTML = optionsStr;
+        
+        // 還原該行最新數值
+        if (localGuestsList[rowIndex]) {
+            select.value = localGuestsList[rowIndex].group || currentCategories[0];
+        }
+    });
+}
+
+// 🌟 升級功能：關閉並確認自訂分類彈窗
 function closeCustomCategoryDialog(isConfirm) {
     const overlay = document.getElementById('custom-dialog-overlay');
     overlay.classList.add('hidden');
     
     if (isConfirm && activeSelectElement) {
         const newCat = document.getElementById('custom-category-input').value.trim();
-        const rowIndex = activeSelectElement.closest('tr').getAttribute('data-index');
+        const tr = activeSelectElement.closest('tr');
+        const rowIndex = tr ? tr.getAttribute('data-index') : null;
 
         if (newCat && !currentCategories.includes(newCat)) {
             currentCategories.push(newCat);
             
-            // 刷新全站所有表格行嘅下拉選單 Options，等其餘每行都能直接選取新分類
-            document.querySelectorAll('.category-select').forEach((select, idx) => {
-                const currentVal = select.value;
-                let optionsStr = "";
-                currentCategories.forEach(c => {
-                    optionsStr += `<option value="${c}">${c}</option>`;
-                });
-                optionsStr += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>`;
-                select.innerHTML = optionsStr;
-                
-                // 還原或者設定當前選取值
-                if (select === activeSelectElement) {
-                    select.value = newCat;
-                    updateLocalData(rowIndex, 'group', newCat);
-                } else {
-                    // 其餘行維持不變
-                    const otherRowIdx = select.closest('tr').getAttribute('data-index');
-                    if (localGuestsList[otherRowIdx]) {
-                        select.value = localGuestsList[otherRowIdx].group || currentCategories[0];
-                    }
-                }
-            });
+            // 刷新全站
+            updateAllSelectElements();
+            
+            // 將當前行直接套用新分類
+            if (rowIndex !== null && localGuestsList[rowIndex]) {
+                activeSelectElement.value = newCat;
+                updateLocalData(rowIndex, 'group', newCat);
+            }
         } else if (newCat && currentCategories.includes(newCat)) {
-            // 如果輸入了已存在的分類，直接幫佢選取
-            activeSelectElement.value = newCat;
-            updateLocalData(rowIndex, 'group', newCat);
+            if (rowIndex !== null && localGuestsList[rowIndex]) {
+                activeSelectElement.value = newCat;
+                updateLocalData(rowIndex, 'group', newCat);
+            }
         } else {
-            // 如果留空取消，打回原形
-            activeSelectElement.value = localGuestsList[rowIndex].group || currentCategories[0];
+            if (rowIndex !== null && localGuestsList[rowIndex]) {
+                activeSelectElement.value = localGuestsList[rowIndex].group || currentCategories[0];
+            }
         }
     } else if (activeSelectElement) {
-        const rowIndex = activeSelectElement.closest('tr').getAttribute('data-index');
-        activeSelectElement.value = localGuestsList[rowIndex].group || currentCategories[0];
+        const tr = activeSelectElement.closest('tr');
+        const rowIndex = tr ? tr.getAttribute('data-index') : null;
+        if (rowIndex !== null && localGuestsList[rowIndex]) {
+            activeSelectElement.value = localGuestsList[rowIndex].group || currentCategories[0];
+        }
     }
     activeSelectElement = null;
 }
