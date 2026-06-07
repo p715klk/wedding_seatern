@@ -78,10 +78,10 @@ function toggleSidebar() {
     const icon = document.getElementById('sidebar-toggle-icon');
     if (isSidebarOpen) {
         sidebar.classList.add('collapsed');
-        icon.innerText = "▶"; // 收埋嗰陣，箭咀指向右邊，提示點擊展開
+        icon.innerText = "▶";
     } else {
         sidebar.classList.remove('collapsed');
-        icon.innerText = "◀"; // 展開嗰陣，箭咀指向左邊，提示點擊收埋
+        icon.innerText = "◀";
     }
     isSidebarOpen = !isSidebarOpen;
 }
@@ -142,30 +142,29 @@ function setSideFilter(side) {
 // 🎯 核心：對齊鷗鷗版面渲染
 function renderSidebar() {
     const poolContainer = document.getElementById('unassigned-pool');
-    const counter = document.getElementById('unassigned-count');
+    if (!poolContainer) return;
     poolContainer.innerHTML = '';
 
-    // 更新切換按鈕狀態
     const btnMale = document.getElementById('filter-male');
     const btnFemale = document.getElementById('filter-female');
     
-    if (currentSideFilter === '男方') {
-        btnMale.className = "flex-1 py-2 rounded-lg bg-blue-600 text-white font-bold shadow-sm text-center transition-all";
-        btnFemale.className = "flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 text-center transition-all";
-    } else {
-        btnMale.className = "flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 text-center transition-all";
-        btnFemale.className = "flex-1 py-2 rounded-lg bg-rose-600 text-white font-bold shadow-sm text-center transition-all";
+    if (btnMale && btnFemale) {
+        if (currentSideFilter === '男方') {
+            btnMale.className = "flex-1 py-2 rounded-lg bg-blue-600 text-white font-bold shadow-sm text-center transition-all";
+            btnFemale.className = "flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 text-center transition-all";
+        } else {
+            btnMale.className = "flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 text-center transition-all";
+            btnFemale.className = "flex-1 py-2 rounded-lg bg-rose-600 text-white font-bold shadow-sm text-center transition-all";
+        }
     }
 
     const cleanPool = unassignedPool.filter(g => g && g.name && g.side === currentSideFilter);
-    counter.innerText = `${cleanPool.length}人`;
 
     if (cleanPool.length === 0) {
         poolContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-12 font-medium">🎉 該類別暫無未安排賓客</div>`;
         return;
     }
 
-    // 按群組分組顯示
     let groups = {};
     unassignedPool.forEach((guest, index) => {
         if (!guest || !guest.name || guest.side !== currentSideFilter) return;
