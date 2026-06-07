@@ -15,45 +15,43 @@ let activeSelectElement = null;
 let sortableInstance = null;    
 
 // 初始化 SortableJS
-if (typeof Sortable !== 'undefined' && tbody) {
-    sortableInstance = Sortable.create(tbody, {
-        handle: '.drag-handle',
-        animation: 150,
-        ghostClass: 'sortable-ghost',
-        onEnd: function () {
-            recalculateSortNumbersFromDOM();
-        }
-    });
-}
-
-// 🎯 只監聽 wedding_guests 專屬節點，絕對保證能完美 Sync 排位畫布
-database.ref('wedding_guests').on('value', (snapshot) => {
-    const weddingGuests = snapshot.val() || {};
-    
-    // 避免使用者打字或選單揀緊嘢時被實時渲染刷新打斷
-    if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
-        processAndRenderExcel(weddingGuests);
+sortableInstance = Sortable.create(tbody, {
+    handle: '.drag-handle',
+    animation: 150,
+    ghostClass: 'sortable-ghost',
+    onEnd: function () {
+        recalculateSortNumbersFromDOM();
     }
 });
 
-// 🎯 將畫布端格式打散並渲染至後台
-function processAndRenderExcel(weddingGuests) {
+// 🎯 同時監聽成個婚宴根節點，確保未分配同已分配一齊撈出嚟
+database.ref().on('value', (snapshot) => {
+    const rootData = snapshot.val() || {};
+    const weddingGuests = rootData.wedding_guests || {};
+    const unassignedGuests = rootData.unassigned_guests || [];
+    
+    // 如果使用者目前正在打字或選選單，唔好打斷使用者
+    if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+        mergeAndRenderExcel(weddingGuests, unassignedGuests);
+    }
+});
+
+// 🎯 核心重構：合併名單並渲染，徹底解決「睇唔到未安排賓客」嘅問題
+function mergeAndRenderExcel(weddingGuests, unassignedGuests) {
     localGuestsList = [];
     tbody.innerHTML = '';
 
+    // 1. 放入有分配桌次嘅人
     Object.keys(weddingGuests).forEach(tableNum => {
         const list = weddingGuests[tableNum];
         if (Array.isArray(list)) {
             list.forEach(guest => {
                 if (guest && guest.name) {
-                    // 如果桌號是 99，代表它是未安排在桌子上的賓客
-                    const isUnassigned = (tableNum === '99' || parseInt(tableNum) === 99);
-                    
                     localGuestsList.push({
                         name: guest.name,
                         side: guest.side || '男方',
                         group: guest.group || '未分類',
-                        table: isUnassigned ? '' : parseInt(tableNum), 
+                        table: parseInt(tableNum), // 有桌次
                         sort: guest.sort || 1
                     });
                 }
@@ -61,19 +59,30 @@ function processAndRenderExcel(weddingGuests) {
         }
     });
 
-    if (localGuestsList.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-gray-400 font-bold">🎉 目前名單內沒有任何賓客，請點右上角「新增賓客」開始建立。</td></tr>`;
-        return;
+    // 2. 放入完全冇分配桌次（未安排）嘅人
+    if (Array.isArray(unassignedGuests)) {
+        unassignedGuests.forEach(guest => {
+            if (guest && guest.name) {
+                localGuestsList.push({
+                    name: guest.name,
+                    side: guest.side || '男方',
+                    group: guest.group || '未分類',
+                    table: '', // 桌次直接留空！代表未安排
+                    sort: 99
+                });
+            }
+        });
     }
 
+    // 依照原本嘅順序排列顯示
     renderDOMRows();
 }
 
-// 繪製 HTML 橫列
+// 將資料陣列繪製成真實 HTML 橫列
 function renderDOMRows() {
     tbody.innerHTML = '';
     
-    // 自動將未記錄的自訂群組擴充至清單
+    // 收集現有數據中所有出現過嘅群組，自動擴充下拉選單
     localGuestsList.forEach(g => {
         if (g.group && !currentCategories.includes(g.group)) {
             currentCategories.push(g.group);
@@ -84,31 +93,34 @@ function renderDOMRows() {
         const tr = document.createElement('tr');
         tr.className = "hover:bg-gray-50 transition bg-white";
         
+        // 來源 Side 下拉
         const sideSelectHTML = `
-            <select class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white focus:ring-1 focus:ring-red-500 focus:outline-none">
+            <select class="w-full border border-gray-200 rounded p-1 text-xs font-bold table-select bg-transparent focus:bg-white focus:ring-1 focus:ring-red-500 focus:outline-none">
                 <option value="男方" ${guest.side === '男方' ? 'selected' : ''}>♂️ 男方</option>
                 <option value="女方" ${guest.side === '女方' ? 'selected' : ''}>♀️ 女方</option>
             </select>
         `;
 
+        // 群組 Group 下拉
         let groupOptions = currentCategories.map(cat => `<option value="${cat}" ${guest.group === cat ? 'selected' : ''}>${cat}</option>`).join('');
         const groupSelectHTML = `
-            <select onchange="handleGroupChange(this)" class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white focus:ring-1 focus:ring-red-500 focus:outline-none">
+            <select onchange="handleGroupChange(this)" class="w-full border border-gray-200 rounded p-1 text-xs font-bold table-select bg-transparent focus:bg-white focus:ring-1 focus:ring-red-500 focus:outline-none">
                 ${groupOptions}
                 <option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂分類...</option>
             </select>
         `;
 
+        // 🎯 修正重點：桌次由選擇框直接改成 <input type="number">，你想填咩就填咩，空白就是未安排
         const tableInputHTML = `
-            <input type="number" min="1" max="99" placeholder="未安排" value="${guest.table !== undefined && guest.table !== null ? guest.table : ''}" 
-                   class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white">
+            <input type="number" min="1" max="99" placeholder="未安排" value="${guest.table !== undefined ? guest.table : ''}" 
+                   class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center excel-input bg-transparent focus:bg-white">
         `;
 
         tr.innerHTML = `
             <td class="py-2 px-3 text-center font-mono text-gray-400 font-bold row-sort-num">${index + 1}</td>
             <td class="py-2 px-3 text-center drag-handle text-gray-400 text-base select-none">☰</td>
             <td class="py-2 px-3">
-                <input type="text" value="${guest.name}" class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white">
+                <input type="text" value="${guest.name}" class="w-full border border-gray-200 rounded p-1 text-xs font-bold excel-input bg-transparent focus:bg-white">
             </td>
             <td class="py-2 px-3">${sideSelectHTML}</td>
             <td class="py-2 px-3">${groupSelectHTML}</td>
@@ -122,17 +134,13 @@ function renderDOMRows() {
     });
 }
 
-// 手動新增一列
+// 🎯 修正重點：新增賓客列時，桌次（Table）絕對是預設空白！
 function addNewGuestRow() {
-    if (tbody.querySelector('td[colspan="7"]')) {
-        tbody.innerHTML = '';
-    }
-
     const tr = document.createElement('tr');
-    tr.className = "hover:bg-gray-50 transition bg-white";
+    tr.className = "hover:bg-gray-50 transition bg-white new-row-animate";
 
     const sideSelectHTML = `
-        <select class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white">
+        <select class="w-full border border-gray-200 rounded p-1 text-xs font-bold table-select bg-transparent focus:bg-white">
             <option value="男方" selected>♂️ 男方</option>
             <option value="女方">♀️ 女方</option>
         </select>
@@ -140,15 +148,16 @@ function addNewGuestRow() {
 
     let groupOptions = currentCategories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
     const groupSelectHTML = `
-        <select onchange="handleGroupChange(this)" class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white">
+        <select onchange="handleGroupChange(this)" class="w-full border border-gray-200 rounded p-1 text-xs font-bold table-select bg-transparent focus:bg-white">
             ${groupOptions}
             <option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂分類...</option>
         </select>
     `;
 
+    // 預設直接是空白，不綁死任何數字桌次
     const tableInputHTML = `
         <input type="number" min="1" max="99" placeholder="未安排" value="" 
-               class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white">
+               class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center excel-input bg-transparent focus:bg-white">
     `;
 
     const nextIndex = tbody.children.length + 1;
@@ -157,7 +166,7 @@ function addNewGuestRow() {
         <td class="py-2 px-3 text-center font-mono text-gray-400 font-bold row-sort-num">${nextIndex}</td>
         <td class="py-2 px-3 text-center drag-handle text-gray-400 text-base select-none">☰</td>
         <td class="py-2 px-3">
-            <input type="text" value="" placeholder="請輸入姓名" class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white">
+            <input type="text" value="" placeholder="請輸入姓名" class="w-full border border-gray-200 rounded p-1 text-xs font-bold excel-input bg-transparent focus:bg-white">
         </td>
         <td class="py-2 px-3">${sideSelectHTML}</td>
         <td class="py-2 px-3">${groupSelectHTML}</td>
@@ -171,7 +180,7 @@ function addNewGuestRow() {
     scrollContainer.scrollTop = scrollContainer.scrollHeight; 
 }
 
-// 群組變更與新增視窗控制
+// 監聽群組自訂選取
 function handleGroupChange(selectEl) {
     if (selectEl.value === '__NEW__') {
         activeSelectElement = selectEl;
@@ -191,6 +200,7 @@ function closeCustomCategoryDialog(isConfirm) {
         if (newCat && !currentCategories.includes(newCat)) {
             currentCategories.push(newCat);
             
+            // 刷新所有人的下拉選單
             const allSelects = tbody.querySelectorAll('td:nth-child(5) select');
             allSelects.forEach(sel => {
                 const savedVal = sel.value;
@@ -215,74 +225,85 @@ function deleteRowAction(btn) {
 function recalculateSortNumbersFromDOM() {
     const rows = tbody.querySelectorAll('tr');
     rows.forEach((row, idx) => {
-        const numEl = row.querySelector('.row-sort-num');
-        if (numEl) numEl.innerText = idx + 1;
+        row.querySelector('.row-sort-num').innerText = idx + 1;
     });
 }
 
-// 🎯 按鈕功能：完美寫回、Sync 畫布端數據格式
+// 🎯 核心重構：儲存至 Firebase 邏輯（完美拆解已分配與未安排，丟回畫布）
 function saveAllToFirebase() {
     const rows = tbody.querySelectorAll('tr');
-    let newWeddingGuests = {};   
+    
+    let newWeddingGuests = {};   // 存放有填桌號的人
+    let newUnassignedPool = [];  // 存放桌號空白的人
 
     rows.forEach((row) => {
         const inputs = row.querySelectorAll('input');
         const selects = row.querySelectorAll('select');
 
-        if (inputs.length < 2 || selects.length < 2) return;
-
         const gName = inputs[0].value.trim();
         const gSide = selects[0].value;
         const gGroup = selects[1].value;
-        const gTableRaw = inputs[1].value.trim(); 
+        const gTableRaw = inputs[1].value.trim(); // 拿取輸入框嘅數字
 
-        if (!gName) return; 
+        if (!gName) return; // 跳過空姓名
 
-        // 如果留空代表「未安排」，儲存時自動包裝成桌號 99 丟進畫布待分配 Pool
-        let targetTable = 99;
+        // 如果有填桌次（係有效數字）
         if (gTableRaw !== "" && !isNaN(gTableRaw)) {
-            targetTable = parseInt(gTableRaw);
-        }
+            const tableNum = parseInt(gTableRaw);
+            if (!newWeddingGuests[tableNum]) {
+                newWeddingGuests[tableNum] = [];
+            }
+            
+            // 計算目前呢張桌子內排到第幾位座位
+            const currentSeatCount = newWeddingGuests[tableNum].length + 1;
 
-        if (!newWeddingGuests[targetTable]) {
-            newWeddingGuests[targetTable] = [];
+            newWeddingGuests[tableNum].push({
+                name: gName,
+                side: gSide,
+                group: gGroup,
+                sort: currentSeatCount // 在該桌內的座位號碼
+            });
+        } else {
+            // 冇填桌次，一律丟進未安排名單
+            newUnassignedPool.push({
+                name: gName,
+                side: gSide,
+                group: gGroup,
+                sort: 99
+            });
         }
-        
-        const currentSeatCount = newWeddingGuests[targetTable].length + 1;
-
-        newWeddingGuests[targetTable].push({
-            name: gName,
-            side: gSide,
-            group: gGroup,
-            sort: targetTable === 99 ? 99 : currentSeatCount 
-        });
     });
 
-    // 🌟 直接全面覆蓋 wedding_guests 節點，保證跟排位畫布絕對同步
-    database.ref('wedding_guests').set(newWeddingGuests).then(() => {
-        alert("✨ 【數據同步成功】！\n後台 Excel 的名單與自訂桌次已完美同步至畫布。");
+    // 將整理乾淨嘅新結構一次過寫入 Firebase 覆蓋更新
+    const finalPayload = {
+        wedding_guests: newWeddingGuests,
+        unassigned_guests: newUnassignedPool
+    };
+
+    database.ref().update(finalPayload).then(() => {
+        alert("✨ 【後台數據同步成功】！\n所有修改與排序已即時同步至前台與畫布。");
     }).catch(err => {
         alert("❌ 儲存失敗: " + err.message);
     });
 }
 
-// CSV 導出備份
+// 匯出成 CSV
 function exportToCSV() {
     if (localGuestsList.length === 0) { alert("目前沒有數據可導出！"); return; }
+    
     let csvContent = "\uFEFF姓名,來源(男方/女方),群組,分配桌次\n";
     
+    // 依目前 DOM 上嘅真實狀況導出
     const rows = tbody.querySelectorAll('tr');
     rows.forEach(row => {
         const inputs = row.querySelectorAll('input');
         const selects = row.querySelectorAll('select');
-        if(inputs.length >= 2 && selects.length >= 2) {
-            const name = inputs[0].value.trim();
-            const side = selects[0].value;
-            const group = selects[1].value;
-            const table = inputs[1].value.trim();
-            if (name) {
-                csvContent += `"${name}","${side}","${group}","${table}"\n`;
-            }
+        const name = inputs[0].value.trim();
+        const side = selects[0].value;
+        const group = selects[1].value;
+        const table = inputs[1].value.trim();
+        if (name) {
+            csvContent += `"${name}","${side}","${group}","${table}"\n`;
         }
     });
 
@@ -295,7 +316,7 @@ function exportToCSV() {
     document.body.removeChild(link);
 }
 
-// CSV 匯入
+// CSV 匯入邏輯
 function importCSVAction() {
     const fileInput = document.getElementById('csv-file-input');
     const file = fileInput.files[0];
@@ -311,6 +332,7 @@ function importCSVAction() {
             const line = lines[i].trim();
             if (!line) continue;
             
+            // 簡單處理逗號切分（未處理複雜引號）
             const parts = line.split(',');
             if (parts.length >= 2) {
                 const name = parts[0].replace(/"/g, '').trim();
@@ -329,6 +351,7 @@ function importCSVAction() {
             }
         }
 
+        // 將匯入數據轉為真實 rows
         localGuestsList = importedGuests;
         renderDOMRows();
         alert(`成功解析 ${importedGuests.length} 位賓客！確認無誤後請點擊「儲存變更」。`);
@@ -336,7 +359,7 @@ function importCSVAction() {
     reader.readAsText(file, 'UTF-8');
 }
 
-// 鎖定手機行為
+// 鎖定 iPhone 行為與右鍵阻擋
 (function() {
     let adminLastTouchEnd = 0;
     document.addEventListener('touchstart', function (event) {
@@ -351,15 +374,4 @@ function importCSVAction() {
         adminLastTouchEnd = now;
     }, false);
 })();
-
 document.addEventListener('contextmenu', event => event.preventDefault());
-
-document.addEventListener('keydown', event => {
-    if (
-        event.key === 'F12' ||
-        (event.ctrlKey && event.shiftKey && (event.key === 'I' || event.key === 'C')) ||
-        (event.ctrlKey && event.key === 'u')
-    ) {
-        event.preventDefault();
-    }
-});
