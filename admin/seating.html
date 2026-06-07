@@ -8,50 +8,51 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <style>
-        /* 鷗鷗高級防反白與手勢優化 */
         body {
             user-select: none;
             -webkit-user-select: none;
         }
-        /* 點點高級畫布背景 */
+        /* 點點無限畫布背景 */
         .workspace-canvas {
             background-color: #f1f5f9;
             background-image: radial-gradient(#cbd5e1 1.5px, transparent 1.5px);
             background-size: 20px 20px;
             position: absolute;
-            width: 4000px;
-            height: 3000px;
+            width: 5000px; /* 加大畫布 */
+            height: 4000px;
             transform-origin: 0 0;
             cursor: grab;
         }
-        .workspace-canvas:active {
-            cursor: grabbing;
-        }
-        /* 圓枱外框 */
-        .draggable-table {
-            position: absolute;
-            z-index: 10;
-        }
-        /* 圓形座位定位 */
+        .workspace-canvas:active { cursor: grabbing; }
+        .draggable-table { position: absolute; z-index: 10; }
         .seat-slot {
             position: absolute;
             transform: translate(-50%, -50%);
-            transition: transform 0.15s ease, box-shadow 0.15s ease;
         }
-        /* 賓客名膠囊貼紙：極致扁平化、高級半透明 */
-        .guest-pill {
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
-            font-weight: 600;
+        /* 賓客名牌：解決交疊與字數過長問題 */
+        .guest-chip-fixed {
+            width: 82px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 0 4px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
             cursor: grab;
+            transition: transform 0.1s ease;
         }
-        .guest-pill:active {
-            cursor: grabbing;
+        .guest-chip-fixed:active { cursor: grabbing; }
+        .text-ellipsis {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
         }
-        /* 側邊欄隱藏動畫 */
-        #sidebar-panel.collapsed {
-            transform: translateX(-100%);
-        }
-        /* 隱藏原生滾動條 */
+        #sidebar-panel.collapsed { transform: translateX(-100%); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
@@ -61,11 +62,11 @@
     <header class="bg-white text-slate-800 h-14 px-4 shadow-sm flex justify-between items-center shrink-0 border-b border-slate-200 z-30">
         <div class="flex items-center gap-3">
             <h1 class="text-base font-black tracking-wider text-slate-900 flex items-center gap-1.5">
-                <span class="text-xl">🦢</span> SEATING OOO <span class="text-xs font-normal text-slate-400">視覺化智能排座位</span>
+                <span class="text-xl">🦢</span> SEATING OOO
             </h1>
             <div class="text-[11px] bg-slate-100 px-2.5 py-1 rounded-full text-slate-600 font-bold" id="global-stats">載入中...</div>
-            <div class="text-[10px] text-slate-400 font-medium hidden md:block bg-slate-50 border border-slate-200/60 px-2 py-0.5 rounded">
-                💡 操作提示：直接滾動滑輪放大縮小 | 按住滑鼠右鍵或空白鍵可拖拽移動整張畫布
+            <div class="text-[10px] text-slate-400 font-medium hidden lg:block bg-slate-50 border border-slate-200/60 px-2 py-0.5 rounded">
+                🖱️ 直接滾動縮放畫布 | 按住空白鍵或滑鼠拖拽畫布空白處可平移視角
             </div>
         </div>
         <div class="flex items-center gap-2">
@@ -78,7 +79,7 @@
                 ➕ 新增圓枱
             </button>
             <a href="admin.html" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition">
-                📋 後台
+                📋 返回表格
             </a>
         </div>
     </header>
@@ -88,55 +89,66 @@
         <aside id="sidebar-panel" class="absolute lg:relative top-0 bottom-0 left-0 w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-xl z-20 transition-transform duration-300 ease-out"
                ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
             
-            <button onclick="toggleSidebar()" class="absolute -right-3 top-1/2 -translate-y-1/2 w-3.5 h-16 bg-white border border-l-0 border-slate-200 rounded-r-md shadow-md flex items-center justify-center text-[9px] text-slate-400 hover:text-indigo-600 hover:bg-slate-50 z-50 transition-colors" title="收合側邊欄">
+            <button onclick="toggleSidebar()" class="absolute -right-5 top-1/2 -translate-y-1/2 w-6 h-20 bg-indigo-600 text-white border border-indigo-500 rounded-r-xl shadow-lg flex items-center justify-center font-black text-xs hover:bg-indigo-700 transition-all z-50" title="展開/收合名單">
                 <span id="sidebar-toggle-icon">◀</span>
             </button>
             
             <div class="p-4 border-b border-slate-100 bg-slate-50/80">
                 <div class="flex items-center justify-between mb-2">
-                    <h2 class="text-xs font-black tracking-wider text-slate-500 uppercase flex items-center gap-1">
-                        📋 未安排賓客
-                    </h2>
+                    <h2 class="text-xs font-black tracking-wider text-slate-500 uppercase flex items-center gap-1">📋 未安排賓客</h2>
                     <span id="unassigned-count" class="text-[10px] bg-slate-200 px-2 py-0.5 rounded-full font-bold text-slate-600">0人</span>
                 </div>
                 <input type="text" id="sidebar-search" oninput="renderSidebar()" placeholder="搜尋姓名、群組..." 
-                       class="w-full p-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white mb-2.5 transition">
+                       class="w-full p-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white mb-2.5">
                 
                 <div class="flex gap-1 text-[11px]">
-                    <button onclick="setSideFilter('all')" id="filter-all" class="flex-1 py-1 rounded bg-slate-800 text-white font-bold transition shadow-sm">全部</button>
+                    <button onclick="setSideFilter('all')" id="filter-all" class="flex-1 py-1 rounded bg-slate-800 text-white font-bold transition">全部</button>
                     <button onclick="setSideFilter('男方')" id="filter-male" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-semibold transition">男方</button>
                     <button onclick="setSideFilter('女方')" id="filter-female" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-semibold transition">女方</button>
                 </div>
             </div>
 
-            <div class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/40 no-scrollbar" id="unassigned-pool">
-                <p class="text-center text-slate-400 text-xs py-4">名單加載中...</p>
-            </div>
+            <div class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/40 no-scrollbar" id="unassigned-pool"></div>
         </aside>
 
         <main class="flex-1 relative overflow-hidden" id="canvas-viewport">
-            <div class="workspace-canvas" id="main-canvas" ondragover="allowDrop(event)">
-                </div>
+            <div class="workspace-canvas" id="main-canvas" ondragover="allowDrop(event)"></div>
         </main>
 
+    </div>
+
+    <div id="guest-detail-modal" class="fixed inset-0 bg-slate-950/40 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-slate-100">
+            <div class="flex justify-between items-start mb-3">
+                <h3 class="text-base font-black text-slate-900">🔍 賓客席位資訊</h3>
+                <button onclick="closeGuestModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
+            </div>
+            <div class="space-y-2.5 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
+                <div class="flex justify-between"><span class="text-slate-400">姓名:</span> <span id="md-guest-name" class="font-bold text-slate-800"></span></div>
+                <div class="flex justify-between"><span class="text-slate-400">群組:</span> <span id="md-guest-group" class="font-bold text-indigo-600"></span></div>
+                <div class="flex justify-between"><span class="text-slate-400">來源:</span> <span id="md-guest-side" class="font-bold text-slate-700"></span></div>
+                <div class="flex justify-between"><span class="text-slate-400">目前座位:</span> <span id="md-guest-seat" class="font-mono bg-amber-100 px-1.5 py-0.5 rounded text-amber-800 font-bold"></span></div>
+            </div>
+            <div class="flex justify-end gap-2 mt-5 pt-3 border-t border-slate-100">
+                <button onclick="removeGuestFromSeatAction()" class="w-full py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1">
+                    ↩️ 移出此座位 (退回名單)
+                </button>
+            </div>
+        </div>
     </div>
 
     <div id="table-settings-modal" class="fixed inset-0 bg-slate-950/40 z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-slate-100">
             <h3 class="text-sm font-black text-slate-900 mb-3" id="modal-table-title">⚙️ 圓枱設定</h3>
-            <div class="space-y-3">
-                <div>
-                    <label class="block text-[11px] font-bold text-slate-500 mb-1">此桌座位數量 (人數上限)：</label>
-                    <input type="number" id="modal-max-seats" min="1" max="16" class="w-full border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                </div>
+            <div>
+                <label class="block text-[11px] font-bold text-slate-500 mb-1">此桌座位數量 (人數上限)：</label>
+                <input type="number" id="modal-max-seats" min="1" max="16" class="w-full border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
             </div>
             <div class="flex justify-between items-center mt-5 pt-3 border-t border-slate-100">
-                <button onclick="deleteTableAction()" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-md text-xs font-bold transition">
-                    🗑️ 刪除此桌
-                </button>
+                <button onclick="deleteTableAction()" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-md text-xs font-bold transition">🗑️ 刪除此桌</button>
                 <div class="flex gap-2">
                     <button onclick="closeSettingsModal()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-bold">取消</button>
-                    <button onclick="saveTableSettingsAction()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-bold shadow-sm">儲存</button>
+                    <button onclick="saveTableSettingsAction()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-bold">儲存</button>
                 </div>
             </div>
         </div>
