@@ -11,69 +11,108 @@ let tableSettings = {};
 let currentSideFilter = 'all';
 let activeSettingTableNum = null;
 
-// 1. 摺疊側邊欄功能
+// ==========================================
+// 📌 核心一：Miro/Figma 等級畫布手勢平移與直覺縮放
+// ==========================================
+let zoom = 0.9; // 預設微縮小看全景
+let panX = 40;  // 預設偏移
+let panY = 40;
+let isPanning = false;
+let startX, startY;
+
+const viewport = document.getElementById('canvas-viewport');
+const canvas = document.getElementById('main-canvas');
+
+function applyTransform() {
+    canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    document.getElementById('zoom-percent').innerText = `${Math.round(zoom * 100)}%`;
+}
+
+// 1. 直覺滾輪縮放 (無需任何按鍵)
+viewport.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const zoomFactor = 1.1;
+    let nextZoom = e.deltaY < 0 ? zoom * zoomFactor : zoom / zoomFactor;
+    
+    // 限制縮放範圍在 30% 到 200%
+    nextZoom = Math.min(2.0, Math.max(0.3, nextZoom));
+
+    // 以滑鼠目前位置為中心進行縮放
+    const rect = viewport.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    panX = mouseX - (mouseX - panX) * (nextZoom / zoom);
+    panY = mouseY - (mouseY - panY) * (nextZoom / zoom);
+    zoom = nextZoom;
+    applyTransform();
+}, { passive: false });
+
+// 2. 畫布抓取平移 (支援按住右鍵拖拽 / 或直接拖拽空白位)
+viewport.addEventListener('mousedown', (e) => {
+    // 如果點擊到的是圓枱或賓客，就不觸發畫布平移
+    if (e.target.closest('.draggable-table') || e.target.closest('.seat-slot') || e.target.closest('button')) return;
+    
+    isPanning = true;
+    viewport.style.cursor = 'grabbing';
+    startX = e.clientX - panX;
+    startY = e.clientY - panY;
+});
+
+window.addEventListener('mousemove', (e) => {
+    if (!isPanning) return;
+    panX = e.clientX - startX;
+    panY = e.clientY - startY;
+    applyTransform();
+});
+
+window.addEventListener('mouseup', () => {
+    if (isPanning) {
+        isPanning = false;
+        viewport.style.cursor = 'auto';
+    }
+});
+
+// 防止右鍵彈出選單干擾拖拽
+viewport.addEventListener('contextmenu', e => e.preventDefault());
+
+function zoomCanvas(factor) {
+    zoom = Math.min(2.0, Math.max(0.3, zoom * factor));
+    applyTransform();
+}
+
+// ==========================================
+// 📌 核心二：側邊欄收合邏輯 (內部按鈕)
+// ==========================================
 let isSidebarOpen = true;
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar-panel');
     const icon = document.getElementById('sidebar-toggle-icon');
     if (isSidebarOpen) {
-        sidebar.style.marginLeft = "-320px"; // 摺埋
+        sidebar.classList.add('collapsed');
         icon.innerText = "▶";
     } else {
-        sidebar.style.marginLeft = "0px";    // 伸展
+        sidebar.classList.remove('collapsed');
         icon.innerText = "◀";
     }
     isSidebarOpen = !isSidebarOpen;
 }
 
-// 2. 畫布放大縮小功能 (Zoom) 核心變數
-let currentZoom = 1.0;
-const minZoom = 0.4;
-const maxZoom = 2.0;
-
-function updateZoomUI() {
-    const canvas = document.getElementById('main-canvas');
-    canvas.style.transform = `scale(${currentZoom})`;
-    document.getElementById('zoom-percent').innerText = `${Math.round(currentZoom * 100)}%`;
-}
-
-function zoomCanvas(factor) {
-    currentZoom = Math.min(maxZoom, Math.max(minZoom, currentZoom * factor));
-    updateZoomUI();
-}
-
-function resetZoomAction() {
-    currentZoom = 1.0;
-    updateZoomUI();
-}
-
-// 綁定 Ctrl + 滾輪縮放畫布
-document.getElementById('canvas-scroll-container').addEventListener('wheel', (e) => {
-    if (e.ctrlKey) {
-        e.preventDefault();
-        if (e.deltaY < 0) {
-            zoomCanvas(1.05); // 放大
-        } else {
-            zoomCanvas(0.95); // 縮小
-        }
-    }
-}, { passive: false });
-
-
-// 拖動圓枱變數
+// ==========================================
+// 📌 核心三：圓枱移動 (與畫布縮放比完美同步)
+// ==========================================
 let isDraggingTable = false;
 let draggedTableElement = null;
-let offsetX = 0;
-let offsetY = 0;
+let tableOffsetX = 0;
+let tableOffsetY = 0;
 
-// 監聽 Firebase 數據庫
+// 監聽 Firebase
 database.ref().on('value', (snapshot) => {
     const root = snapshot.val() || {};
     allGuests = root.wedding_guests || [];
     unassignedPool = root.unassigned_guests || [];
     tableSettings = root.table_settings || {};
 
-    // 初始化防呆：生成 1-14 桌預設位置
     let updatedSettings = false;
     for(let i = 1; i <= 14; i++) {
         if (!tableSettings[i]) {
@@ -81,8 +120,8 @@ database.ref().on('value', (snapshot) => {
             const col = (i - 1) % 4;
             tableSettings[i] = {
                 max_seats: 12,
-                x: 100 + col * 380,
-                y: 80 + row * 380
+                x: 120 + col * 420,
+                y: 100 + row * 420
             };
             updatedSettings = true;
         }
@@ -95,6 +134,7 @@ database.ref().on('value', (snapshot) => {
     renderSidebar();
     renderCanvasTables();
     updateGlobalStats();
+    applyTransform(); // 初始化擺位
 });
 
 function updateGlobalStats() {
@@ -105,21 +145,21 @@ function updateGlobalStats() {
         }
     });
     unassignedPool.forEach(g => { if (g && g.name) { total++; } });
-    document.getElementById('global-stats').innerText = `已坐: ${assigned} / 總賓客: ${total} 人`;
+    document.getElementById('global-stats').innerText = `已排位: ${assigned} / 總人數: ${total}`;
 }
 
 function setSideFilter(side) {
     currentSideFilter = side;
     ['filter-all', 'filter-male', 'filter-female'].forEach(id => {
-        document.getElementById(id).className = "flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold transition";
+        document.getElementById(id).className = "flex-1 py-1 rounded bg-slate-100 text-slate-600 font-semibold transition";
     });
-    if (side === 'all') document.getElementById('filter-all').className = "flex-1 py-1 rounded bg-slate-700 text-white font-bold transition";
-    if (side === '男方') document.getElementById('filter-male').className = "flex-1 py-1 rounded bg-blue-600 text-white font-bold transition";
-    if (side === '女方') document.getElementById('filter-female').className = "flex-1 py-1 rounded bg-rose-600 text-white font-bold transition";
+    if (side === 'all') document.getElementById('filter-all').className = "flex-1 py-1 rounded bg-slate-800 text-white font-bold transition shadow-sm";
+    if (side === '男方') document.getElementById('filter-male').className = "flex-1 py-1 rounded bg-blue-600 text-white font-bold transition shadow-sm";
+    if (side === '女方') document.getElementById('filter-female').className = "flex-1 py-1 rounded bg-rose-600 text-white font-bold transition shadow-sm";
     renderSidebar();
 }
 
-// 🌟 1. 渲染左側賓客卡片
+// 渲染左邊名單
 function renderSidebar() {
     const poolContainer = document.getElementById('unassigned-pool');
     const counter = document.getElementById('unassigned-count');
@@ -127,10 +167,10 @@ function renderSidebar() {
     const searchKey = document.getElementById('sidebar-search').value.trim().toLowerCase();
 
     const cleanPool = unassignedPool.filter(g => g && g.name);
-    counter.innerText = `${cleanPool.length} 人`;
+    counter.innerText = `${cleanPool.length}人`;
 
     if (cleanPool.length === 0) {
-        poolContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-8 font-bold">🎉 所有人都排好位喇！</div>`;
+        poolContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-8 font-medium">🎉 所有賓客均已入座</div>`;
         return;
     }
 
@@ -146,15 +186,15 @@ function renderSidebar() {
 
     Object.keys(groups).forEach(groupName => {
         const groupWrap = document.createElement('div');
-        groupWrap.className = "bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm";
-        groupWrap.innerHTML = `<h4 class="text-[11px] font-black text-indigo-600 mb-2 border-b pb-1">📍 ${groupName}</h4>`;
+        groupWrap.className = "bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm";
+        groupWrap.innerHTML = `<h4 class="text-[11px] font-bold text-slate-400 mb-2 border-b border-slate-100 pb-1 flex items-center gap-1">🏷️ ${groupName}</h4>`;
         
         const chipsContainer = document.createElement('div');
         chipsContainer.className = "grid grid-cols-2 gap-1.5";
 
         groups[groupName].forEach(item => {
             const chip = document.createElement('div');
-            chip.className = `guest-chip text-xs font-bold p-2 rounded-lg border text-center shadow-sm truncate transition-all hover:scale-105 active:scale-95 ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`;
+            chip.className = `guest-pill text-xs p-2 rounded-lg border text-center transition-all hover:translate-y-[-1px] hover:shadow-md active:scale-95 ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
             chip.innerText = item.data.name;
             chip.setAttribute('draggable', 'true');
             
@@ -169,11 +209,11 @@ function renderSidebar() {
     });
 }
 
-// 🌟 2. 渲染右側大畫布 (UI 美化進化版)
+// ==========================================
+// 📌 核心四：UI 高級美化渲染 (比照鷗鷗風格)
+// ==========================================
 function renderCanvasTables() {
-    const canvas = document.getElementById('main-canvas');
     const sortedTableNums = Object.keys(tableSettings).sort((a,b) => parseInt(a) - parseInt(b));
-    
     document.querySelectorAll('.draggable-table').forEach(el => el.remove());
 
     sortedTableNums.forEach(tableNum => {
@@ -189,23 +229,23 @@ function renderCanvasTables() {
             }
         });
 
-        // 大框架
+        // 圓枱大框架
         const tableWrapper = document.createElement('div');
-        tableWrapper.className = "draggable-table w-72 h-72 flex items-center justify-center";
+        tableWrapper.className = "draggable-table w-80 h-80 flex items-center justify-center";
         tableWrapper.style.left = `${settings.x}px`;
         tableWrapper.style.top = `${settings.y}px`;
         tableWrapper.setAttribute('data-table', tableNum);
 
-        // 圓枱內圈美化：加上立體高雅深邃陰影與漸變色
+        // 核心內木圈（極簡白/奶油風格，配精緻微陰影）
         const innerCircle = document.createElement('div');
-        innerCircle.className = "w-36 h-36 rounded-full bg-gradient-to-br from-amber-50 to-orange-100/60 border-4 border-amber-400 shadow-[0_10px_25px_-5px_rgba(217,119,6,0.3)] flex flex-col items-center justify-center relative z-10 font-black text-slate-700 transition hover:border-amber-500";
+        innerCircle.className = "w-40 h-40 rounded-full bg-white border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.06)] flex flex-col items-center justify-center relative z-10 select-none";
         innerCircle.innerHTML = `
-            <div class="text-[11px] uppercase tracking-wider text-amber-700 font-bold">TABLE</div>
-            <div class="text-2xl font-black text-amber-900 -mt-0.5">${tableNum}</div>
-            <div class="text-[10px] bg-amber-200/70 text-amber-950 px-1.5 py-0.5 rounded-md mt-1 flex items-center gap-0.5">
-                👥 ${guestsInTable.filter(g=>g&&g.name).length}/${maxSeats}
+            <div class="text-[10px] uppercase font-bold tracking-widest text-slate-400">TABLE</div>
+            <div class="text-3xl font-black text-slate-800 my-0.5">${tableNum}</div>
+            <div class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">
+                ${guestsInTable.filter(g=>g&&g.name).length} / ${maxSeats} 人
             </div>
-            <button class="text-[10px] text-slate-400 hover:text-amber-700 mt-1 transition">⚙️ 設定</button>
+            <button class="text-[10px] text-indigo-500 hover:text-indigo-700 font-semibold mt-1.5 transition">⚙️設定</button>
         `;
         
         innerCircle.querySelector('button').onclick = (e) => {
@@ -213,24 +253,23 @@ function renderCanvasTables() {
             openSettingsModal(tableNum, maxSeats);
         };
 
-        // 按住圓枱內圈即可自由移位
+        // 圓枱移動事件 (防走位精準計算)
         innerCircle.onmousedown = (e) => {
             if (e.target.tagName === 'BUTTON') return;
             isDraggingTable = true;
             draggedTableElement = tableWrapper;
-            // 考慮到縮放比例 (Zoom Level) 對拖拽位移嘅影響
-            offsetX = (e.clientX / currentZoom) - tableWrapper.offsetLeft;
-            offsetY = (e.clientY / currentZoom) - tableWrapper.offsetTop;
+            tableOffsetX = (e.clientX / zoom) - tableWrapper.offsetLeft;
+            tableOffsetY = (e.clientY / zoom) - tableWrapper.offsetTop;
             tableWrapper.style.zIndex = 1000;
         };
 
-        // 🎯 環形精緻座位分佈
+        // 環形座位完美工整排佈
         for (let i = 0; i < maxSeats; i++) {
             const seatSlot = document.createElement('div');
             const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
-            const radius = 105; // 擴大半徑，留位俾靚靚人名 Chip
-            const x = 144 + radius * Math.cos(angle); 
-            const y = 144 + radius * Math.sin(angle);
+            const radius = 120; // 半徑擴大，避免擁擠
+            const x = 160 + radius * Math.cos(angle); 
+            const y = 160 + radius * Math.sin(angle);
 
             seatSlot.style.left = `${x}px`;
             seatSlot.style.top = `${y}px`;
@@ -238,8 +277,8 @@ function renderCanvasTables() {
             const guest = seatSlotsArray[i];
 
             if (guest) {
-                // 💎 人名貼紙美化：極致圓潤、白字、男藍女粉、精緻微陰影
-                seatSlot.className = `seat-slot guest-chip-on-seat px-2.5 py-1.5 rounded-full text-xs font-black flex items-center justify-center border text-center shadow-md truncate max-w-[90px] border-white text-white ${guest.side === '女方' ? 'bg-gradient-to-r from-rose-400 to-rose-500 shadow-rose-300/40' : 'bg-gradient-to-r from-blue-400 to-blue-500 shadow-blue-300/40'}`;
+                // 高級扁平膠囊名牌：字體清晰、顯色柔和、男女識別度高
+                seatSlot.className = `seat-slot guest-pill text-xs px-2.5 py-1.5 rounded-full border border-white/60 text-center shadow-sm font-bold truncate max-w-[100px] text-white ${guest.side === '女方' ? 'bg-rose-400 shadow-rose-200' : 'bg-blue-400 shadow-blue-200'}`;
                 seatSlot.innerText = guest.name;
                 seatSlot.setAttribute('draggable', 'true');
 
@@ -248,8 +287,8 @@ function renderCanvasTables() {
                     e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: tableNum, seatIndex: i, name: guest.name }));
                 });
             } else {
-                // ⚪ 空座位點：變得低調柔和
-                seatSlot.className = "seat-slot w-7 h-7 rounded-full border-2 border-dashed border-slate-300 bg-white/90 text-slate-400 font-mono text-[10px] flex items-center justify-center hover:bg-amber-50 hover:border-amber-400 hover:text-amber-600 hover:scale-110 shadow-sm";
+                // 質感小灰點空位
+                seatSlot.className = "seat-slot w-7 h-7 rounded-full border-2 border-dashed border-slate-200 bg-white text-slate-300 font-mono text-[10px] flex items-center justify-center hover:bg-indigo-50 hover:border-indigo-400 hover:text-indigo-500 hover:scale-110 shadow-sm transition-all";
                 seatSlot.innerText = i + 1;
             }
 
@@ -264,21 +303,20 @@ function renderCanvasTables() {
     });
 }
 
-// 監聽畫布上圓枱移位
-document.onmousemove = (e) => {
+// 畫布上滑鼠移動事件 (全局防抖)
+document.addEventListener('mousemove', (e) => {
     if (!isDraggingTable || !draggedTableElement) return;
-    // 拖曳時除以目前的 Zoom 比例，防止拖動速度跟唔上手勢
-    let x = (e.clientX / currentZoom) - offsetX;
-    let y = (e.clientY / currentZoom) - offsetY;
+    let x = (e.clientX / zoom) - tableOffsetX;
+    let y = (e.clientY / zoom) - tableOffsetY;
     
     if (x < 0) x = 0;
     if (y < 0) y = 0;
     
     draggedTableElement.style.left = `${x}px`;
     draggedTableElement.style.top = `${y}px`;
-};
+});
 
-document.onmouseup = () => {
+document.addEventListener('mouseup', () => {
     if (isDraggingTable && draggedTableElement) {
         const tableNum = draggedTableElement.getAttribute('data-table');
         const x = parseInt(draggedTableElement.style.left);
@@ -289,7 +327,7 @@ document.onmouseup = () => {
     }
     isDraggingTable = false;
     draggedTableElement = null;
-};
+});
 
 function allowDrop(e) { e.preventDefault(); }
 
@@ -341,10 +379,9 @@ function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
         updates['unassigned_guests'] = unassignedPool;
         database.ref().update(updates);
 
-    } catch (err) { console.error("落位失敗", err); }
+    } catch (err) { console.error(err); }
 }
 
-// 🌟 4. 移出座位丟進左側名單 (放低即時重繪優化)
 function handleDropTrash(e) {
     e.preventDefault();
     try {
@@ -387,14 +424,10 @@ function createNewTableAction() {
     const maxSeats = prompt(`請輸入第 ${cleanNum} 桌的人數上限：`, "12");
     const cleanMax = parseInt(maxSeats) || 12;
 
-    const scrollContainer = document.getElementById('canvas-scroll-container');
-    const rx = scrollContainer.scrollLeft + 200;
-    const ry = scrollContainer.scrollTop + 150;
-
     database.ref(`table_settings/${cleanNum}`).set({
         max_seats: cleanMax,
-        x: rx,
-        y: ry
+        x: Math.abs(panX) + 200,
+        y: Math.abs(panY) + 150
     });
 }
 
