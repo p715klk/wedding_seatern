@@ -3,17 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自製鷗鷗 - 婚宴視覺化排位畫布</title>
-    <!-- 引入 Tailwind CSS 網格與排版 -->
+    <title>自製鷗鷗 - 視覺化高級排位畫布</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 Firebase SDK (同你原本版本一致) -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-    <!-- 引入 HTML5 Drag and Drop 輔助或者用純原生，呢度用原生最穩陣 -->
     <style>
-        .table-canvas {
-            background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
-            background-size: 16px 16px;
+        /* 鷗鷗風格的點點畫布背景 */
+        .workspace-canvas {
+            background-color: #f8fafc;
+            background-image: radial-gradient(#cbd5e1 1.5px, transparent 1.5px);
+            background-size: 24px 24px;
+            position: relative;
+            width: 2500px; /* 超大畫布，可以自由排佈 14 張枱 */
+            height: 2000px;
+        }
+        /* 可拖動的圓枱卡片 */
+        .draggable-table {
+            position: absolute;
+            cursor: move;
+            transition: box-shadow 0.2s;
+            user-select: none;
+        }
+        .draggable-table:active {
+            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+        }
+        /* 圓形座位定位 */
+        .seat-slot {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            transition: all 0.2s;
         }
         .guest-chip {
             cursor: grab;
@@ -21,94 +40,80 @@
         .guest-chip:active {
             cursor: grabbing;
         }
-        /* 圓形座位定位計算 */
-        .seat-dot {
-            position: absolute;
-            transform: translate(-50%, -50%);
-        }
     </style>
 </head>
-<body class="bg-gray-50 text-gray-800 font-sans h-screen flex flex-col select-none overflow-hidden">
+<body class="bg-slate-900 text-slate-800 font-sans h-screen flex flex-col select-none overflow-hidden">
 
-    <!-- 頂部功能列 -->
-    <header class="bg-gray-800 text-white p-4 shadow flex justify-between items-center shrink-0">
+    <header class="bg-slate-800 text-white p-4 shadow-lg flex justify-between items-center shrink-0 border-b border-slate-700">
         <div class="flex items-center gap-4">
-            <h1 class="text-xl font-bold tracking-wider text-red-400">🦢 自製排位鷗鷗 (Seating Master)</h1>
-            <div class="text-xs text-gray-400" id="global-stats">已安排: 0 / 總人數: 0</div>
+            <h1 class="text-lg font-black tracking-wider text-amber-400 flex items-center gap-2">🦢 SEATING OOO (高級自製鷗鷗)</h1>
+            <div class="text-xs bg-slate-700 px-2 py-1 rounded text-slate-300 font-mono" id="global-stats">載入中...</div>
         </div>
         <div class="flex gap-2">
-            <button onclick="createNewTablePrompt()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg text-sm font-bold shadow transition">
-                ➕ 新增桌次
+            <button onclick="createNewTableAction()" class="bg-amber-500 hover:bg-amber-600 text-slate-950 px-3 py-1.5 rounded-lg text-xs font-black shadow transition">
+                ➕ 新增圓枱
             </button>
-            <a href="admin.html" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold transition">
+            <a href="admin.html" class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition">
                 📋 返回 Excel 後台
             </a>
-            <a href="../index.html" class="bg-red-700 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold transition">
-                ⬅️ 返回現場平面圖
+            <a href="../index.html" class="bg-rose-700 hover:bg-rose-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition">
+                ⬅️ 離開
             </a>
         </div>
     </header>
 
-    <!-- 主體內容：左邊名單，右邊畫布 -->
     <div class="flex flex-1 overflow-hidden w-full">
         
-        <!-- 左邊：未安排賓客名單 (側邊欄) -->
-        <aside class="w-80 bg-white border-r border-gray-200 flex flex-col shrink-0 overflow-hidden">
-            <div class="p-4 border-b border-gray-100 bg-gray-50">
-                <input type="text" id="sidebar-search" oninput="renderSidebar()" placeholder="搜尋未安排賓客..." 
-                       class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-400">
+        <aside class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-hidden shadow-xl z-20">
+            <div class="p-4 border-b border-slate-100 bg-slate-50">
+                <input type="text" id="sidebar-search" oninput="renderSidebar()" placeholder="搜尋未入座賓客..." 
+                       class="w-full p-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white">
                 
-                <!-- 快捷 Filter -->
-                <div class="flex gap-2 mt-2 text-xs">
-                    <button onclick="setSideFilter('all')" id="filter-all" class="px-2 py-1 rounded bg-gray-700 text-white font-bold">全部</button>
-                    <button onclick="setSideFilter('男方')" id="filter-male" class="px-2 py-1 rounded bg-gray-100 text-gray-600">男方</button>
-                    <button onclick="setSideFilter('女方')" id="filter-female" class="px-2 py-1 rounded bg-gray-100 text-gray-600">女方</button>
+                <div class="flex gap-1 mt-2 text-[11px]">
+                    <button onclick="setSideFilter('all')" id="filter-all" class="flex-1 py-1 rounded bg-slate-700 text-white font-bold">全部</button>
+                    <button onclick="setSideFilter('男方')" id="filter-male" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold">男方</button>
+                    <button onclick="setSideFilter('女方')" id="filter-female" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold">女方</button>
                 </div>
             </div>
 
-            <!-- 賓客名單 Pool -->
-            <div class="flex-1 overflow-y-auto p-4 space-y-4" id="unassigned-pool">
-                <!-- 動態產出：會跟據 Group 分類打包，好似你幅圖噉 -->
-                <p class="text-center text-gray-400 text-sm py-4">載入名單中...</p>
+            <div class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/50" id="unassigned-pool">
+                <p class="text-center text-slate-400 text-xs py-4">名單加載中...</p>
             </div>
 
-            <!-- 底部垃圾桶：用黎將人由枱面拖番出黎「踢走」 -->
             <div id="trash-zone" ondragover="allowDrop(event)" ondrop="handleDropTrash(event)"
-                 class="p-4 bg-red-50 border-t-2 border-dashed border-red-200 text-center text-red-700 font-bold text-sm transition-colors duration-200">
-                🗑️ 拖拉賓客到此：移出座位
+                 class="p-4 bg-rose-50 border-t border-dashed border-rose-300 text-center text-rose-700 font-black text-xs transition-all">
+                🗑️ 拖放賓客到此：取消座位 (移出圓枱)
             </div>
         </aside>
 
-        <!-- 右邊：主排位大畫布 -->
-        <main class="flex-1 bg-gray-100 table-canvas p-6 overflow-y-auto" id="canvas-container">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-12 p-4" id="tables-grid">
-                <!-- 動態產出 1-14 桌或自訂桌 -->
-            </div>
+        <main class="flex-1 overflow-auto bg-slate-100 relative" id="canvas-scroll-container">
+            <div class="workspace-canvas" id="main-canvas" ondragover="allowDrop(event)">
+                </div>
         </main>
 
     </div>
 
-    <!-- 彈出對話框：修改單桌人數上限 / 刪除桌 -->
-    <div id="table-settings-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-gray-100">
-            <h3 class="text-base font-bold text-gray-900 mb-2" id="modal-table-title">⚙️ 調整第 X 桌設定</h3>
-            <div class="mb-4">
-                <label class="block text-xs font-bold text-gray-500 mb-1">此桌人數上限 (座位數)：</label>
-                <input type="number" id="modal-max-seats" min="1" max="16" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
+    <div id="table-settings-modal" class="fixed inset-0 bg-slate-950/60 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full p-5 border border-slate-100">
+            <h3 class="text-sm font-black text-slate-900 mb-3 flex items-center gap-2" id="modal-table-title">⚙️ 圓枱設定</h3>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-500 mb-1">此桌座位數量 (人數上限)：</label>
+                    <input type="number" id="modal-max-seats" min="1" max="16" class="w-full border border-slate-300 rounded-lg p-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500">
+                </div>
             </div>
-            <div class="flex justify-between items-center gap-2">
-                <button onclick="deleteTableAction()" class="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-xs font-bold transition">
-                    🗑️ 刪除此整張桌
+            <div class="flex justify-between items-center mt-5 pt-3 border-t border-slate-100">
+                <button onclick="deleteTableAction()" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-md text-xs font-bold transition">
+                    🗑️ 刪除此桌
                 </button>
                 <div class="flex gap-2">
-                    <button onclick="closeSettingsModal()" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold transition">取消</button>
-                    <button onclick="saveTableSettingsAction()" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition">儲存</button>
+                    <button onclick="closeSettingsModal()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-bold">取消</button>
+                    <button onclick="saveTableSettingsAction()" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md text-xs font-black shadow">儲存</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 引入核心 JavaScript 邏輯 -->
     <script src="seating.js"></script>
 </body>
 </html>

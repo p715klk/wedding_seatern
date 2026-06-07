@@ -1,29 +1,41 @@
-// Firebase 初始化
+// Firebase 設定
 const firebaseConfig = {
     databaseURL: "https://wedding-seatern-default-rtdb.asia-southeast1.firebasedatabase.app/" 
 };
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-// 全局變數狀態
-let allGuests = [];         // 來自 Firebase 的 wedding_guests (Array 格式)
-let unassignedPool = [];    // 來自 Firebase 的 unassigned_guests (獨立 Node)
-let tableSettings = {};     // 來自 Firebase 的 table_settings
+let allGuests = [];         // 來自 wedding_guests
+let unassignedPool = [];    // 來自 unassigned_guests
+let tableSettings = {};     // 來自 table_settings (新增存儲 x, y)
 let currentSideFilter = 'all';
 let activeSettingTableNum = null;
 
-// 監聽 Firebase 數據根目錄
+// 拖動圓枱專用變數
+let isDraggingTable = false;
+let draggedTableElement = null;
+let offsetX = 0;
+let offsetY = 0;
+
+// 監聽 Firebase 數據庫
 database.ref().on('value', (snapshot) => {
     const root = snapshot.val() || {};
     allGuests = root.wedding_guests || [];
     unassignedPool = root.unassigned_guests || [];
     tableSettings = root.table_settings || {};
 
-    // 自動初始化 table_settings (預設 1 到 14 桌，每桌上限 12 人)
+    // 初始化防呆：生成 1-14 桌預設位置（好似排兵布陣噉散開）
     let updatedSettings = false;
     for(let i = 1; i <= 14; i++) {
         if (!tableSettings[i]) {
-            tableSettings[i] = { max_seats: 12 };
+            // 自動計算格子散開，避免全部疊喺 (0,0)
+            const row = Math.floor((i - 1) / 4);
+            const col = (i - 1) % 4;
+            tableSettings[i] = {
+                max_seats: 12,
+                x: 100 + col * 360,
+                y: 80 + row * 360
+            };
             updatedSettings = true;
         }
     }
@@ -32,56 +44,45 @@ database.ref().on('value', (snapshot) => {
         return; 
     }
 
-    // 數據就位，刷新畫面
     renderSidebar();
     renderCanvasTables();
     updateGlobalStats();
 });
 
-// 計算總人數統計
 function updateGlobalStats() {
-    let total = 0;
-    let assigned = 0;
-    
-    // 計算已分配人數
+    let total = 0, assigned = 0;
     allGuests.forEach(table => {
         if (Array.isArray(table)) {
             table.forEach(g => { if (g && g.name) { total++; assigned++; } });
         }
     });
-    // 計算未分配人數
     unassignedPool.forEach(g => { if (g && g.name) { total++; } });
-
-    document.getElementById('global-stats').innerText = `已排位: ${assigned} / 總人數: ${total} 人`;
+    document.getElementById('global-stats').innerText = `已坐: ${assigned} / 總賓客: ${total} 人`;
 }
 
-// 側邊欄篩選切換
 function setSideFilter(side) {
     currentSideFilter = side;
     ['filter-all', 'filter-male', 'filter-female'].forEach(id => {
-        document.getElementById(id).className = "px-2 py-1 rounded bg-gray-100 text-gray-600";
+        document.getElementById(id).className = "flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold";
     });
-    if (side === 'all') document.getElementById('filter-all').className = "px-2 py-1 rounded bg-gray-700 text-white font-bold";
-    if (side === '男方') document.getElementById('filter-male').className = "px-2 py-1 rounded bg-blue-600 text-white font-bold";
-    if (side === '女方') document.getElementById('filter-female').className = "px-2 py-1 rounded bg-red-600 text-white font-bold";
+    if (side === 'all') document.getElementById('filter-all').className = "flex-1 py-1 rounded bg-slate-700 text-white font-bold";
+    if (side === '男方') document.getElementById('filter-male').className = "flex-1 py-1 rounded bg-blue-600 text-white font-bold";
+    if (side === '女方') document.getElementById('filter-female').className = "flex-1 py-1 rounded bg-rose-600 text-white font-bold";
     renderSidebar();
 }
 
-// 🌟 1. 渲染左側「未安排賓客」
+// 🌟 1. 渲染左側賓客卡片 (鷗鷗高顏值清單)
 function renderSidebar() {
     const poolContainer = document.getElementById('unassigned-pool');
     poolContainer.innerHTML = '';
     const searchKey = document.getElementById('sidebar-search').value.trim().toLowerCase();
 
-    // 排除因為刪除可能產生的 null
     const cleanPool = unassignedPool.filter(g => g && g.name);
-
     if (cleanPool.length === 0) {
-        poolContainer.innerHTML = `<div class="text-center text-gray-400 text-xs py-8">🎉 所有賓客已安排入座！</div>`;
+        poolContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-8">🎉 所有人都排好位喇！</div>`;
         return;
     }
 
-    // 按 Group 分組
     let groups = {};
     cleanPool.forEach((guest, index) => {
         if (searchKey && !guest.name.toLowerCase().includes(searchKey) && !guest.group.toLowerCase().includes(searchKey)) return;
@@ -94,222 +95,277 @@ function renderSidebar() {
 
     Object.keys(groups).forEach(groupName => {
         const groupWrap = document.createElement('div');
-        groupWrap.className = "bg-gray-50 p-2 rounded-xl border border-gray-200 shadow-sm";
-        groupWrap.innerHTML = `<h4 class="text-xs font-black text-purple-700 mb-2 px-1">📍 ${groupName} (${groups[groupName].length}人)</h4>`;
+        groupWrap.className = "bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm";
+        groupWrap.innerHTML = `<h4 class="text-[11px] font-black text-indigo-600 mb-2 border-b pb-1">📍 ${groupName}</h4>`;
         
         const chipsContainer = document.createElement('div');
-        chipsContainer.className = "flex flex-wrap gap-1.5";
+        chipsContainer.className = "grid grid-cols-2 gap-1.5";
 
         groups[groupName].forEach(item => {
             const chip = document.createElement('div');
-            chip.className = `guest-chip text-xs font-bold px-2 py-1 rounded shadow-sm border transition-transform hover:scale-105 ${item.data.side === '女方' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
+            chip.className = `guest-chip text-xs font-bold p-2 rounded-lg border text-center shadow-sm truncate transition-transform hover:scale-105 ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
             chip.innerText = item.data.name;
             chip.setAttribute('draggable', 'true');
             
             chip.addEventListener('dragstart', (e) => {
-                // 用 "POOL" 代表它是從左邊未分配水池拉出來的
                 e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: "POOL", index: item.originalIndex, name: item.data.name }));
-                document.getElementById('trash-zone').className = "p-4 bg-red-100 border-t-2 border-dashed border-red-400 text-center text-red-700 font-bold text-sm scale-105 transition-all";
+                document.getElementById('trash-zone').className = "p-4 bg-rose-100 border-t-2 border-dashed border-rose-400 text-center text-rose-700 font-black text-xs scale-105 transition-all";
             });
             chip.addEventListener('dragend', () => {
-                document.getElementById('trash-zone').className = "p-4 bg-red-50 border-t-2 border-dashed border-red-200 text-center text-red-700 font-bold text-sm";
+                document.getElementById('trash-zone').className = "p-4 bg-rose-50 border-t border-dashed border-rose-300 text-center text-rose-700 font-black text-xs";
             });
 
             chipsContainer.appendChild(chip);
         });
-
         groupWrap.appendChild(chipsContainer);
         poolContainer.appendChild(groupWrap);
     });
 }
 
-// 🌟 2. 渲染右側大畫布圓枱
+// 🌟 2. 渲染右側真正的大畫布（鷗鷗極致體驗）
 function renderCanvasTables() {
-    const grid = document.getElementById('tables-grid');
-    grid.innerHTML = '';
-
-    // 獲取所有有效的桌號
+    const canvas = document.getElementById('main-canvas');
+    
+    // 為了不讓拖動時畫面閃爍，我們只在初次或數據更新時更新，這裡用最穩定的方式清空重畫
+    // 先保留正在拖拽的桌子狀態
     const sortedTableNums = Object.keys(tableSettings).sort((a,b) => parseInt(a) - parseInt(b));
+    
+    // 清除舊圓枱
+    document.querySelectorAll('.draggable-table').forEach(el => el.remove());
 
     sortedTableNums.forEach(tableNum => {
         const idx = parseInt(tableNum);
-        const maxSeats = tableSettings[tableNum].max_seats || 12;
+        const settings = tableSettings[tableNum];
+        const maxSeats = settings.max_seats || 12;
         
-        // 讀取該桌的賓客 Array
         const guestsInTable = allGuests[idx] || [];
-        const activeGuests = guestsInTable.filter(g => g && g.name);
-        const currentCount = activeGuests.length;
+        // 建立長度為 maxSeats 且對應 sort 數值的座位陣列
+        const seatSlotsArray = new Array(maxSeats).fill(null);
+        guestsInTable.forEach(g => {
+            if (g && g.name && g.sort >= 1 && g.sort <= maxSeats) {
+                seatSlotsArray[g.sort - 1] = g;
+            }
+        });
 
-        const tableCard = document.createElement('div');
-        tableCard.className = "bg-white p-4 rounded-2xl shadow-md border-2 border-gray-200 flex flex-col items-center justify-between relative min-h-[240px] pt-14 pb-4";
-        tableCard.setAttribute('ondragover', 'allowDrop(event)');
-        tableCard.setAttribute('ondrop', `handleDropOnTable(event, "${tableNum}")`);
+        // 建立一整組圓枱元件 (直徑 180px 包含外圈座位大框)
+        const tableWrapper = document.createElement('div');
+        tableWrapper.className = "draggable-table bg-transparent w-64 h-64 flex items-center justify-center";
+        tableWrapper.style.left = `${settings.x}px`;
+        tableWrapper.style.top = `${settings.y}px`;
+        tableWrapper.setAttribute('data-table', tableNum);
 
-        const setBtn = document.createElement('button');
-        setBtn.className = "absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-sm p-1";
-        setBtn.innerHTML = "⚙️ 設定";
-        setBtn.onclick = () => openSettingsModal(tableNum, maxSeats);
-        tableCard.appendChild(setBtn);
-
-        const title = document.createElement('div');
-        title.className = "absolute top-3 left-4 text-sm font-black text-gray-700";
-        title.innerText = `第 ${tableNum} 桌`;
-        tableCard.appendChild(title);
-
-        const circleTable = document.createElement('div');
-        circleTable.className = "w-28 h-28 rounded-full border-4 border-gray-200 flex flex-col items-center justify-center bg-gray-50 relative shadow-inner z-10";
-        circleTable.innerHTML = `
-            <span class="text-2xl font-black text-gray-700">${currentCount}</span>
-            <span class="text-[10px] text-gray-400 font-bold">上限 ${maxSeats}人</span>
+        // 圓枱核心內圈 (140px 直徑)
+        const innerCircle = document.createElement('div');
+        innerCircle.className = "w-32 h-32 rounded-full bg-amber-50 border-4 border-amber-300 shadow-md flex flex-col items-center justify-center relative z-10 font-black text-slate-700";
+        innerCircle.innerHTML = `
+            <div class="text-xs text-slate-400">第 ${tableNum} 桌</div>
+            <div class="text-2xl">${guestsInTable.filter(g=>g&&g.name).length}</div>
+            <button class="text-[10px] text-slate-400 hover:text-amber-600">⚙️設定</button>
         `;
-        tableCard.appendChild(circleTable);
+        
+        // 點擊內圈齒輪打開 Modal
+        innerCircle.querySelector('button').onclick = (e) => {
+            e.stopPropagation();
+            openSettingsModal(tableNum, maxSeats);
+        };
 
-        // 畫環形座位點
+        // 實作圓枱大框架的滑鼠拖動移位 (Drag Table Position)
+        innerCircle.onmousedown = (e) => {
+            if (e.target.tagName === 'BUTTON') return;
+            isDraggingTable = true;
+            draggedTableElement = tableWrapper;
+            offsetX = e.clientX - tableWrapper.offsetLeft;
+            offsetY = e.clientY - tableWrapper.offsetTop;
+            tableWrapper.style.zIndex = 1000;
+        };
+
+        // 🎯 核心：動態計算環形虛線空座位，可以直接把賓客 Drop 入特定序號座位！
         for (let i = 0; i < maxSeats; i++) {
-            const seatDot = document.createElement('div');
+            const seatSlot = document.createElement('div');
             const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
-            const radius = 74; 
-            const x = 56 + radius * Math.cos(angle); 
-            const y = 56 + radius * Math.sin(angle);
+            const radius = 90; // 座位環繞半徑
+            const x = 128 + radius * Math.cos(angle); // 128px 係 w-64 外框嘅半圓心
+            const y = 128 + radius * Math.sin(angle);
 
-            seatDot.className = "seat-dot w-6 h-6 rounded-full border flex items-center justify-center text-[9px] font-black shadow-sm z-20 transition-all";
-            seatDot.style.left = `${x}px`;
-            seatDot.style.top = `${y}px`;
+            seatSlot.style.left = `${x}px`;
+            seatSlot.style.top = `${y}px`;
+            
+            const guest = seatSlotsArray[i];
 
-            if (activeGuests[i]) {
-                const guest = activeGuests[i];
-                seatDot.innerText = guest.name.substring(0, 2);
-                seatDot.title = guest.name;
-                seatDot.setAttribute('draggable', 'true');
-                
-                if (guest.side === '女方') {
-                    seatDot.className += " bg-red-500 text-white border-red-600 cursor-grab";
-                } else {
-                    seatDot.className += " bg-blue-500 text-white border-blue-600 cursor-grab";
-                }
+            if (guest) {
+                // 座位有宾客
+                seatSlot.className = `seat-slot w-14 h-8 rounded-lg shadow-sm text-[11px] font-bold flex items-center justify-center border text-center px-1 truncate ${guest.side === '女方' ? 'bg-rose-500 text-white border-rose-600' : 'bg-blue-500 text-white border-blue-600'}`;
+                seatSlot.innerText = guest.name;
+                seatSlot.setAttribute('draggable', 'true');
 
-                seatDot.addEventListener('dragstart', (e) => {
-                    const realIndex = guestsInTable.findIndex(g => g && g.name === guest.name);
-                    e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: tableNum, index: realIndex, name: guest.name }));
+                // 賓客可以從座位上直接拉走去其他座位
+                seatSlot.addEventListener('dragstart', (e) => {
+                    e.stopPropagation();
+                    e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: tableNum, seatIndex: i, name: guest.name }));
                 });
             } else {
-                seatDot.innerText = `${i+1}`;
-                seatDot.className += " bg-white text-gray-300 border-gray-200";
+                // 空座位：鷗鷗經典的精準數字空位點
+                seatSlot.className = "seat-slot w-7 h-7 rounded-full border-2 border-dashed border-slate-300 bg-white text-slate-400 font-mono text-[10px] flex items-center justify-center hover:bg-slate-100 hover:border-amber-400";
+                seatSlot.innerText = i + 1;
             }
-            circleTable.appendChild(seatDot);
+
+            // 令每一個特定座位點都支援 Drop 機制
+            seatSlot.setAttribute('ondragover', 'allowDrop(event)');
+            seatSlot.setAttribute('ondrop', `handleDropOnSpecificSeat(event, "${tableNum}", ${i})`);
+
+            tableWrapper.appendChild(seatSlot);
         }
 
-        const textSummary = document.createElement('div');
-        textSummary.className = "w-full text-[11px] text-gray-500 mt-4 text-center truncate px-2 border-t pt-2 border-gray-100";
-        textSummary.innerText = currentCount > 0 ? activeGuests.map(g=>g.name).join(', ') : '🈳 目前此桌無人';
-        tableCard.appendChild(textSummary);
-
-        grid.appendChild(tableCard);
+        tableWrapper.appendChild(innerCircle);
+        canvas.appendChild(tableWrapper);
     });
 }
 
+// 監聽畫布上的圓枱拖動移動
+document.onmousemove = (e) => {
+    if (!isDraggingTable || !draggedTableElement) return;
+    let x = e.clientX - offsetX;
+    let y = e.clientY - offsetY;
+    
+    // 邊界防禦
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    
+    draggedTableElement.style.left = `${x}px`;
+    draggedTableElement.style.top = `${y}px`;
+};
+
+document.onmouseup = () => {
+    if (isDraggingTable && draggedTableElement) {
+        const tableNum = draggedTableElement.getAttribute('data-table');
+        const x = parseInt(draggedTableElement.style.left);
+        const y = parseInt(draggedTableElement.style.top);
+        
+        // 即時寫入 Firebase 記錄呢張枱嘅畫布座標位置
+        database.ref(`table_settings/${tableNum}`).update({ x: x, y: y });
+        draggedTableElement.style.zIndex = "";
+    }
+    isDraggingTable = false;
+    draggedTableElement = null;
+};
+
 function allowDrop(e) { e.preventDefault(); }
 
-// 🌟 3. 處理賓客拖放到圓枱
-function handleDropOnTable(e, toTableNum) {
+// 🌟 3. 實作真．鷗鷗靈魂：將人塞入「第幾桌、第幾個位」
+function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
     e.preventDefault();
+    e.stopPropagation();
     try {
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        const { fromTable, index } = data;
-        const toIdx = parseInt(toTableNum);
+        const { fromTable, index, seatIndex, name } = data;
+        const toTableIdx = parseInt(toTableNum);
+        const targetSortNum = targetSeatIdx + 1; // Firebase sort 是由 1 開始計
 
-        if (String(fromTable) === String(toTableNum)) return;
-
-        // 檢查目標桌是否已滿
-        const maxSeats = tableSettings[toTableNum].max_seats || 12;
-        if (!allGuests[toIdx]) allGuests[toIdx] = [];
-        const currentActiveCount = allGuests[toIdx].filter(g => g && g.name).length;
-
-        if (currentActiveCount >= maxSeats) {
-            alert(`❌ 唔好意思，第 ${toTableNum} 桌已經滿座 (${maxSeats}人)！`);
-            return;
-        }
+        if (!allGuests[toTableIdx]) allGuests[toTableIdx] = [];
 
         let movingGuestObj = null;
 
-        // A. 提取賓客數據
+        // A. 先將人由原始位置抽起
         if (fromTable === "POOL") {
-            // 從未安排水池中拔出
             movingGuestObj = unassignedPool[index];
             unassignedPool.splice(index, 1);
         } else {
-            // 從其他圓枱陣列中拔出
-            const fromIdx = parseInt(fromTable);
-            movingGuestObj = allGuests[fromIdx][index];
-            allGuests[fromIdx].splice(index, 1);
-            // 重新排列原桌子的 sort 順序
-            allGuests[fromIdx] = allGuests[fromIdx].filter(g => g && g.name);
-            allGuests[fromIdx].forEach((g, i) => g.sort = i + 1);
+            // 從別的圓枱座位拉過來
+            const fromTableIdx = parseInt(fromTable);
+            const foundIdx = allGuests[fromTableIdx].findIndex(g => g && g.sort === (seatIndex + 1));
+            if (foundIdx !== -1) {
+                movingGuestObj = allGuests[fromTableIdx][foundIdx];
+                allGuests[fromTableIdx].splice(foundIdx, 1);
+            }
         }
 
-        // B. 塞入新桌子
-        allGuests[toIdx] = allGuests[toIdx].filter(g => g && g.name);
-        movingGuestObj.sort = allGuests[toIdx].length + 1;
-        allGuests[toIdx].push(movingGuestObj);
+        if (!movingGuestObj) return;
 
-        // C. 同步回 Firebase
+        // B. 檢查目標座位有沒有人坐緊？如果有，自動將兩個人對調位置 (Swap Seat)
+        const occupiedIdx = allGuests[toTableIdx].findIndex(g => g && g.sort === targetSortNum);
+        if (occupiedIdx !== -1) {
+            // 把被壓住的人踢出黎
+            let bumpedGuest = allGuests[toTableIdx][occupiedIdx];
+            
+            if (fromTable === "POOL") {
+                // 如果來源是左邊大池，被踢出黎嘅人退回左邊大池
+                bumpedGuest.sort = 99;
+                unassignedPool.push(bumpedGuest);
+            } else {
+                // 如果來源是別的座位，兩個人直接跨枱互換交叉對調位置！
+                const fromTableIdx = parseInt(fromTable);
+                bumpedGuest.sort = seatIndex + 1;
+                allGuests[fromTableIdx].push(bumpedGuest);
+            }
+            allGuests[toTableIdx].splice(occupiedIdx, 1);
+        }
+
+        // C. 將拉過黎嘅人安穩塞落去指定號碼座位
+        movingGuestObj.sort = targetSortNum;
+        allGuests[toTableIdx].push(movingGuestObj);
+
+        // D. 清洗清洗名單並塞回 Firebase
         const updates = {};
         updates['wedding_guests'] = allGuests;
         updates['unassigned_guests'] = unassignedPool;
         database.ref().update(updates);
 
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error("落位失敗", err); }
 }
 
-// 🌟 4. 處理拖入垃圾桶（移出座位，退回左側大水池）
+// 🌟 4. 移出座位丟進垃圾桶
 function handleDropTrash(e) {
     e.preventDefault();
     try {
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        const { fromTable, index } = data;
+        const { fromTable, seatIndex } = data;
 
-        if (fromTable === "POOL") return; // 本身就在水池中
+        if (fromTable === "POOL") return;
 
-        const fromIdx = parseInt(fromTable);
-        let movingGuestObj = allGuests[fromIdx][index];
+        const fromTableIdx = parseInt(fromTable);
+        const foundIdx = allGuests[fromTableIdx].findIndex(g => g && g.sort === (seatIndex + 1));
         
-        // 從圓枱移除
-        allGuests[fromIdx].splice(index, 1);
-        allGuests[fromIdx] = allGuests[fromIdx].filter(g => g && g.name);
-        allGuests[fromIdx].forEach((g, i) => g.sort = i + 1);
+        if (foundIdx !== -1) {
+            let movingGuestObj = allGuests[fromTableIdx][foundIdx];
+            allGuests[fromTableIdx].splice(foundIdx, 1);
 
-        // 退回到獨立的未安排池
-        if (!unassignedPool) unassignedPool = [];
-        movingGuestObj.sort = 99; // 標記未排位狀態
-        unassignedPool.push(movingGuestObj);
+            movingGuestObj.sort = 99;
+            if (!unassignedPool) unassignedPool = [];
+            unassignedPool.push(movingGuestObj);
 
-        // 更新 Firebase
-        const updates = {};
-        updates['wedding_guests'] = allGuests;
-        updates['unassigned_guests'] = unassignedPool;
-        database.ref().update(updates);
+            const updates = {};
+            updates['wedding_guests'] = allGuests;
+            updates['unassigned_guests'] = unassignedPool;
+            database.ref().update(updates);
+        }
     } catch (err) { console.error(err); }
 }
 
-// 🌟 5. 後台功能：動態新增全新一桌
-function createNewTablePrompt() {
-    const newNum = prompt("請輸入新桌子的編號 (例如輸入: 15):");
+// 🌟 5. 新增一桌 (隨機放喺畫布中間位置方便拖拉)
+function createNewTableAction() {
+    const newNum = prompt("請輸入全新圓枱桌號 (例如: 15):");
     if (!newNum || newNum.trim() === "") return;
     const cleanNum = newNum.trim();
 
     if (tableSettings[cleanNum]) {
-        alert("⚠️ 呢個桌號已經存在。");
+        alert("❌ 此桌號已存在！");
         return;
     }
 
     const maxSeats = prompt(`請輸入第 ${cleanNum} 桌的人數上限：`, "12");
     const cleanMax = parseInt(maxSeats) || 12;
 
-    database.ref(`table_settings/${cleanNum}`).set({ max_seats: cleanMax })
-        .then(() => { alert(`✅ 成功新增「第 ${cleanNum} 桌」(上限 ${cleanMax} 人)！`); });
+    const scrollContainer = document.getElementById('canvas-scroll-container');
+    const rx = scrollContainer.scrollLeft + 200;
+    const ry = scrollContainer.scrollTop + 150;
+
+    database.ref(`table_settings/${cleanNum}`).set({
+        max_seats: cleanMax,
+        x: rx,
+        y: ry
+    }).then(() => { alert(`✅ 成功建立「第 ${cleanNum} 桌」！`); });
 }
 
-// 🌟 6. 後台功能：單桌進階設定視窗控制 (改人數上限/刪桌)
 function openSettingsModal(tableNum, currentMax) {
     activeSettingTableNum = tableNum;
     document.getElementById('modal-table-title').innerText = `⚙️ 調整第 ${tableNum} 桌設定`;
@@ -325,28 +381,18 @@ function closeSettingsModal() {
 function saveTableSettingsAction() {
     if (!activeSettingTableNum) return;
     const newMax = parseInt(document.getElementById('modal-max-seats').value) || 12;
-
     database.ref(`table_settings/${activeSettingTableNum}/max_seats`).set(newMax)
         .then(() => { closeSettingsModal(); });
 }
 
 function deleteTableAction() {
     if (!activeSettingTableNum) return;
-    
-    if (confirm(`⚠️ 確定要刪除「第 ${activeSettingTableNum} 桌」嗎？\n入面所有人會安全退回左側【未安排賓客清單】！`)) {
+    if (confirm(`⚠️ 確定要刪除第 ${activeSettingTableNum} 桌嗎？\n入面所有人會退回左側清單。`)) {
         const idx = parseInt(activeSettingTableNum);
         const guestsInTable = allGuests[idx] || [];
         
         if (!unassignedPool) unassignedPool = [];
-        
-        guestsInTable.forEach(g => {
-            if (g && g.name) {
-                g.sort = 99;
-                unassignedPool.push(g);
-            }
-        });
-        
-        // 清空該桌陣列數據，防止留下 null 殘留
+        guestsInTable.forEach(g => { if (g && g.name) { g.sort = 99; unassignedPool.push(g); } });
         allGuests[idx] = [];
         
         Promise.all([
@@ -354,7 +400,7 @@ function deleteTableAction() {
             database.ref(`unassigned_guests`).set(unassignedPool),
             database.ref(`table_settings/${activeSettingTableNum}`).remove()
         ]).then(() => {
-            alert(`✅ 第 ${activeSettingTableNum} 桌已成功拆除！`);
+            alert("✅ 已成功刪除。");
             closeSettingsModal();
         });
     }
