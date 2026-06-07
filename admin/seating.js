@@ -7,14 +7,13 @@ const database = firebase.database();
 let allGuests = [];         
 let unassignedPool = [];    
 let tableSettings = {};     
-let currentSideFilter = 'all';
+// 🎯 預設跟鷗鷗一樣直接選中「男方」
+let currentSideFilter = '男方';
 let activeSettingTableNum = null;
-
-// 用於記錄目前點擊彈窗內選中的賓客定位
 let selectedGuestContext = null;
 
 // ==========================================
-// 📌 核心一：畫布初始化居中
+// 📌 畫布初始化與平移縮放
 // ==========================================
 let zoom = 0.8; 
 let panX = -900;  
@@ -72,9 +71,7 @@ function zoomCanvas(factor) {
     applyTransform();
 }
 
-// ==========================================
-// 📌 核心二：完美收合側邊欄 (修復空白無填滿問題)
-// ==========================================
+// 側邊欄開合
 let isSidebarOpen = true;
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar-panel');
@@ -89,13 +86,12 @@ function toggleSidebar() {
     isSidebarOpen = !isSidebarOpen;
 }
 
-// 圓枱移動變數
 let isDraggingTable = false;
 let draggedTableElement = null;
 let tableOffsetX = 0;
 let tableOffsetY = 0;
 
-// Firebase 實時數據監聽
+// Firebase 實時同步
 database.ref().on('value', (snapshot) => {
     const root = snapshot.val() || {};
     allGuests = root.wedding_guests || [];
@@ -137,36 +133,42 @@ function updateGlobalStats() {
     document.getElementById('global-stats').innerText = `已排位: ${assigned} / 總人數: ${total}`;
 }
 
+// 🎯 核心：精簡男女方切換高亮
 function setSideFilter(side) {
     currentSideFilter = side;
-    ['filter-all', 'filter-male', 'filter-female'].forEach(id => {
-        document.getElementById(id).className = "flex-1 py-1 rounded bg-slate-100 text-slate-600 font-semibold transition";
-    });
-    if (side === 'all') document.getElementById('filter-all').className = "flex-1 py-1 rounded bg-slate-800 text-white font-bold transition";
-    if (side === '男方') document.getElementById('filter-male').className = "flex-1 py-1 rounded bg-blue-600 text-white font-bold transition shadow-sm";
-    if (side === '女方') document.getElementById('filter-female').className = "flex-1 py-1 rounded bg-rose-600 text-white font-bold transition shadow-sm";
     renderSidebar();
 }
 
+// 🎯 核心：對齊鷗鷗版面渲染
 function renderSidebar() {
     const poolContainer = document.getElementById('unassigned-pool');
     const counter = document.getElementById('unassigned-count');
     poolContainer.innerHTML = '';
-    const searchKey = document.getElementById('sidebar-search').value.trim().toLowerCase();
 
-    const cleanPool = unassignedPool.filter(g => g && g.name);
+    // 更新切換按鈕狀態
+    const btnMale = document.getElementById('filter-male');
+    const btnFemale = document.getElementById('filter-female');
+    
+    if (currentSideFilter === '男方') {
+        btnMale.className = "flex-1 py-2 rounded-lg bg-blue-600 text-white font-bold shadow-sm text-center transition-all";
+        btnFemale.className = "flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 text-center transition-all";
+    } else {
+        btnMale.className = "flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 text-center transition-all";
+        btnFemale.className = "flex-1 py-2 rounded-lg bg-rose-600 text-white font-bold shadow-sm text-center transition-all";
+    }
+
+    const cleanPool = unassignedPool.filter(g => g && g.name && g.side === currentSideFilter);
     counter.innerText = `${cleanPool.length}人`;
 
     if (cleanPool.length === 0) {
-        poolContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-8 font-medium">🎉 所有賓客均已入座</div>`;
+        poolContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-12 font-medium">🎉 該類別暫無未安排賓客</div>`;
         return;
     }
 
+    // 按群組分組顯示
     let groups = {};
-    cleanPool.forEach((guest, index) => {
-        if (searchKey && !guest.name.toLowerCase().includes(searchKey) && !guest.group.toLowerCase().includes(searchKey)) return;
-        if (currentSideFilter !== 'all' && guest.side !== currentSideFilter) return;
-
+    unassignedPool.forEach((guest, index) => {
+        if (!guest || !guest.name || guest.side !== currentSideFilter) return;
         const gName = guest.group || "未分類";
         if (!groups[gName]) groups[gName] = [];
         groups[gName].push({ data: guest, originalIndex: index });
@@ -174,11 +176,11 @@ function renderSidebar() {
 
     Object.keys(groups).forEach(groupName => {
         const groupWrap = document.createElement('div');
-        groupWrap.className = "bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm";
-        groupWrap.innerHTML = `<h4 class="text-[11px] font-bold text-slate-400 mb-2 border-b border-slate-100 pb-1">🏷️ ${groupName}</h4>`;
+        groupWrap.className = "bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm";
+        groupWrap.innerHTML = `<h4 class="text-[11px] font-bold text-slate-400 mb-2.5 border-b border-slate-100 pb-1">🏷️ ${groupName}</h4>`;
         
         const chipsContainer = document.createElement('div');
-        chipsContainer.className = "grid grid-cols-2 gap-1.5";
+        chipsContainer.className = "grid grid-cols-2 gap-2";
 
         groups[groupName].forEach(item => {
             const chip = document.createElement('div');
@@ -312,17 +314,11 @@ document.addEventListener('mouseup', () => {
 
 function allowDrop(e) { e.preventDefault(); }
 
-// ==========================================
-// 📌 核心三：Edit & Update 資訊更正儲存功能
-// ==========================================
 function openGuestModal(guest, tableNum, seatIdx) {
     selectedGuestContext = { guest, tableNum, seatIdx };
-    
-    // 把資料塞入 Input / Select 中供用家自由修改
     document.getElementById('edit-guest-name').value = guest.name;
     document.getElementById('edit-guest-group').value = guest.group || '';
     document.getElementById('edit-guest-side').value = guest.side === '女方' ? '女方' : '男方';
-    
     document.getElementById('md-guest-seat').innerText = `第 ${tableNum} 桌 - 座位 ${seatIdx + 1}`;
     document.getElementById('guest-detail-modal').classList.remove('hidden');
 }
@@ -332,7 +328,6 @@ function closeGuestModal() {
     selectedGuestContext = null;
 }
 
-// 實作彈窗修改並寫入 Firebase 嘅 Update 按鈕
 function saveGuestChangesAction() {
     if (!selectedGuestContext) return;
     const { tableNum, seatIdx } = selectedGuestContext;
@@ -344,14 +339,12 @@ function saveGuestChangesAction() {
 
     if (!newName) { alert("❌ 姓名不能為空！"); return; }
 
-    // 搵出目前圓枱陣列入面嘅嗰位賓客
     const foundIdx = allGuests[tableIdx].findIndex(g => g && g.sort === (seatIdx + 1));
     if (foundIdx !== -1) {
         allGuests[tableIdx][foundIdx].name = newName;
         allGuests[tableIdx][foundIdx].group = newGroup;
         allGuests[tableIdx][foundIdx].side = newSide;
 
-        // 同步寫入數據庫
         database.ref(`wedding_guests/${tableIdx}`).set(allGuests[tableIdx]).then(() => {
             closeGuestModal();
         });
@@ -380,7 +373,6 @@ function removeGuestFromSeatAction() {
     }
 }
 
-// 處理放置
 function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
     e.preventDefault();
     e.stopPropagation();
@@ -478,12 +470,12 @@ function openSettingsModal(tableNum, currentMax) {
     document.getElementById('table-settings-modal').classList.remove('hidden');
 }
 
+// 關閉桌設定 Modal
 function closeSettingsModal() {
     document.getElementById('table-settings-modal').classList.add('hidden');
     activeSettingTableNum = null;
 }
 
-// 枱設定
 function saveTableSettingsAction() {
     if (!activeSettingTableNum) return;
     const newMax = parseInt(document.getElementById('modal-max-seats').value) || 12;
