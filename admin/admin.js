@@ -24,31 +24,17 @@ sortableInstance = Sortable.create(tbody, {
     }
 });
 
-// 🎯 修正重點：分開精準讀取節點，確保唔會被其他雜項 Data 卡死
-function loadFirebaseData() {
-    let weddingGuests = null;
-    let unassignedGuests = null;
-
-    // 用 Promise.all 一口氣精準拿取兩個關鍵節點
-    Promise.all([
-        database.ref('wedding_guests').once('value'),
-        database.ref('unassigned_guests').once('value')
-    ]).then(([snapshot1, snapshot2]) => {
-        weddingGuests = snapshot1.val() || {};
-        unassignedGuests = snapshot2.val() || [];
-
-        // 避免喺打字或選單揀緊嘢時重新渲染打斷使用者
-        if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
-            mergeAndRenderExcel(weddingGuests, unassignedGuests);
-        }
-    }).catch(err => {
-        console.error("Firebase 讀取失敗:", err);
-    });
-}
-
-// 實時監聽 (只要有變動就重新拉取)
-database.ref('wedding_guests').on('value', () => { loadFirebaseData(); });
-database.ref('unassigned_guests').on('value', () => { loadFirebaseData(); });
+// 🎯 修正死鎖：只監聽成個 wedding 根節點，一次過拎晒所有 Data，絕不重複觸發
+database.ref().on('value', (snapshot) => {
+    const rootData = snapshot.val() || {};
+    const weddingGuests = rootData.wedding_guests || {};
+    const unassignedGuests = rootData.unassigned_guests || [];
+    
+    // 避免工作人員喺打字或者選單揀緊嘢時，被實時同步重新渲染打斷
+    if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+        mergeAndRenderExcel(weddingGuests, unassignedGuests);
+    }
+});
 
 // 🎯 合併名單並渲染
 function mergeAndRenderExcel(weddingGuests, unassignedGuests) {
@@ -90,7 +76,7 @@ function mergeAndRenderExcel(weddingGuests, unassignedGuests) {
         });
     }
 
-    // 如果完全冇人，塞一行提示，費事畫面白晒
+    // 如果完全冇人，顯示提示
     if (localGuestsList.length === 0) {
         tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-gray-400 font-bold">🎉 目前名單內沒有任何賓客，請點右上角「新增賓客」開始建立。</td></tr>`;
         return;
@@ -131,7 +117,7 @@ function renderDOMRows() {
             </select>
         `;
 
-        // 桌次直接改成 <input type="number">
+        // 桌次改成數字輸入框
         const tableInputHTML = `
             <input type="number" min="1" max="99" placeholder="未安排" value="${guest.table !== undefined && guest.table !== null ? guest.table : ''}" 
                    class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center excel-input bg-transparent focus:bg-white">
@@ -157,7 +143,6 @@ function renderDOMRows() {
 
 // 新增賓客列（桌次預設空白）
 function addNewGuestRow() {
-    // 如果原本顯示緊「沒有任何賓客」嘅提示，先清空佢
     if (tbody.querySelector('td[colspan="7"]')) {
         tbody.innerHTML = '';
     }
@@ -397,6 +382,3 @@ function importCSVAction() {
     }, false);
 })();
 document.addEventListener('contextmenu', event => event.preventDefault());
-
-// 首次載入執行
-loadFirebaseData();
