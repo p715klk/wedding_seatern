@@ -78,10 +78,10 @@ function toggleSidebar() {
     const icon = document.getElementById('sidebar-toggle-icon');
     if (isSidebarOpen) {
         sidebar.classList.add('collapsed');
-        icon.innerText = "▶";
+        icon.innerText = "▶"; // 收埋嗰陣，箭咀指向右邊，提示點擊展開
     } else {
         sidebar.classList.remove('collapsed');
-        icon.innerText = "◀";
+        icon.innerText = "◀"; // 展開嗰陣，箭咀指向左邊，提示點擊收埋
     }
     isSidebarOpen = !isSidebarOpen;
 }
