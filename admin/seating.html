@@ -64,27 +64,24 @@
 
     <div class="flex flex-1 overflow-hidden w-full">
         
-        <aside class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-hidden shadow-xl z-20">
-            <div class="p-4 border-b border-slate-100 bg-slate-50">
-                <input type="text" id="sidebar-search" oninput="renderSidebar()" placeholder="搜尋未入座賓客..." 
-                       class="w-full p-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white">
-                
-                <div class="flex gap-1 mt-2 text-[11px]">
-                    <button onclick="setSideFilter('all')" id="filter-all" class="flex-1 py-1 rounded bg-slate-700 text-white font-bold">全部</button>
-                    <button onclick="setSideFilter('男方')" id="filter-male" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold">男方</button>
-                    <button onclick="setSideFilter('女方')" id="filter-female" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold">女方</button>
-                </div>
-            </div>
+        <aside class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-hidden shadow-xl z-20"
+       ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
+    
+    <div class="p-4 border-b border-slate-100 bg-slate-50">
+        <input type="text" id="sidebar-search" oninput="renderSidebar()" placeholder="搜尋未入座賓客..." 
+               class="w-full p-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white">
+        
+        <div class="flex gap-1 mt-2 text-[11px]">
+            <button onclick="setSideFilter('all')" id="filter-all" class="flex-1 py-1 rounded bg-slate-700 text-white font-bold">全部</button>
+            <button onclick="setSideFilter('男方')" id="filter-male" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold">男方</button>
+            <button onclick="setSideFilter('女方')" id="filter-female" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold">女方</button>
+        </div>
+    </div>
 
-            <div class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/50" id="unassigned-pool">
-                <p class="text-center text-slate-400 text-xs py-4">名單加載中...</p>
-            </div>
-
-            <div id="trash-zone" ondragover="allowDrop(event)" ondrop="handleDropTrash(event)"
-                 class="p-4 bg-rose-50 border-t border-dashed border-rose-300 text-center text-rose-700 font-black text-xs transition-all">
-                🗑️ 拖放賓客到此：取消座位 (移出圓枱)
-            </div>
-        </aside>
+    <div class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/50" id="unassigned-pool">
+        <p class="text-center text-slate-400 text-xs py-4">名單加載中...</p>
+    </div>
+</aside>
 
         <main class="flex-1 overflow-auto bg-slate-100 relative" id="canvas-scroll-container">
             <div class="workspace-canvas" id="main-canvas" ondragover="allowDrop(event)">

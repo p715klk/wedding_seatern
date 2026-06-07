@@ -107,12 +107,13 @@ function renderSidebar() {
             chip.innerText = item.data.name;
             chip.setAttribute('draggable', 'true');
             
+            // 尋找 renderSidebar 函數入面，修改 chip 的 dragstart 同 dragend 事件：
             chip.addEventListener('dragstart', (e) => {
                 e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: "POOL", index: item.originalIndex, name: item.data.name }));
-                document.getElementById('trash-zone').className = "p-4 bg-rose-100 border-t-2 border-dashed border-rose-400 text-center text-rose-700 font-black text-xs scale-105 transition-all";
+                // 攞走原本控制垃圾桶閃爍嘅 code
             });
             chip.addEventListener('dragend', () => {
-                document.getElementById('trash-zone').className = "p-4 bg-rose-50 border-t border-dashed border-rose-300 text-center text-rose-700 font-black text-xs";
+                // 攞走原本控制垃圾桶恢復嘅 code
             });
 
             chipsContainer.appendChild(chip);
@@ -313,7 +314,7 @@ function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
     } catch (err) { console.error("落位失敗", err); }
 }
 
-// 🌟 4. 移出座位丟進垃圾桶
+// 🌟 4. 移出座位丢进左侧名单 (优化即时刷新)
 function handleDropTrash(e) {
     e.preventDefault();
     try {
@@ -332,6 +333,9 @@ function handleDropTrash(e) {
             movingGuestObj.sort = 99;
             if (!unassignedPool) unassignedPool = [];
             unassignedPool.push(movingGuestObj);
+
+            // 💡 核心優化：本地先即時重繪左邊名單，等畫面唔洗等網絡 Delay 
+            renderSidebar(); 
 
             const updates = {};
             updates['wedding_guests'] = allGuests;
