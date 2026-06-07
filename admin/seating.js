@@ -11,7 +11,7 @@ let activeSettingTableNum = null;
 let selectedGuestContext = null;
 
 // ==========================================
-// 📌 畫布初始化與平移縮放 (已完美修復空白處拉唔郁問題)
+// 📌 畫布初始化與平移縮放 (已修復空白處拉唔郁問題)
 // ==========================================
 let zoom = 0.8; 
 let panX = -900;  
@@ -43,17 +43,15 @@ viewport.addEventListener('wheel', (e) => {
     applyTransform();
 }, { passive: false });
 
-// 🎯 精確鎖定：只有點擊「白圈圓心」或「賓客名牌」先會觸發功能，點擊大正方形透明區域一律允許拖曳畫布！
 viewport.addEventListener('mousedown', (e) => {
     const isSeat = e.target.closest('.seat-slot');
-    const isCenterCircle = e.target.closest('.w-40.h-40'); // 圓枱中間個白圈
+    const isCenterCircle = e.target.closest('.w-40.h-40'); 
     const isInteractive = e.target.closest('button, input, select');
 
     if (isSeat || isCenterCircle || isInteractive) {
-        return; // 這些元件維持原有操作或圓枱拖曳
+        return; 
     }
 
-    // 點擊其餘任何地方（包括隱形透明邊界）一律當作拉動整個畫布
     isPanning = true;
     viewport.style.cursor = 'grabbing';
     startX = e.clientX - panX;
@@ -140,7 +138,7 @@ function updateGlobalStats() {
     document.getElementById('global-stats').innerText = `已排位: ${assigned} / 總人數: ${total}`;
 }
 
-// 🎯 核心重構：同時獨立渲染男方與女方上下分欄名單
+// 🎯 核心渲染更新：緊貼式上下結構
 function renderSidebar() {
     const maleContainer = document.getElementById('pool-male');
     const femaleContainer = document.getElementById('pool-female');
@@ -169,22 +167,21 @@ function renderSidebar() {
         }
     });
 
-    // 渲染男方
+    // 渲染男方段落
     if (maleCount === 0) {
-        maleContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-8 font-medium">🎉 男方已全數安排</div>`;
+        maleContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-4 font-medium">🎉 男方已全數安排</div>`;
     } else {
         renderGroupData(maleGroups, maleContainer);
     }
 
-    // 渲染女方
+    // 渲染女方段落 (自動貼在男方下面)
     if (femaleCount === 0) {
-        femaleContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-8 font-medium">🎉 女方已全數安排</div>`;
+        femaleContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-4 font-medium">🎉 女方已全數安排</div>`;
     } else {
         renderGroupData(femaleGroups, femaleContainer);
     }
 }
 
-// 輔助函式：產生分組卡片與名牌
 function renderGroupData(groups, container) {
     Object.keys(groups).forEach(groupName => {
         const groupWrap = document.createElement('div');
@@ -250,7 +247,6 @@ function renderCanvasTables() {
             openSettingsModal(tableNum, maxSeats);
         };
 
-        // 按住中間白圈可以拖曳圓枱
         innerCircle.onmousedown = (e) => {
             if (e.target.tagName === 'BUTTON') return;
             e.stopPropagation();
