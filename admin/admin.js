@@ -24,59 +24,44 @@ sortableInstance = Sortable.create(tbody, {
     }
 });
 
-// 🎯 只監聽最頂層根目錄一次過拿取，保證唔會無限迴圈，又可以隨時保持實時更新
-database.ref().on('value', (snapshot) => {
-    const rootData = snapshot.val() || {};
-    const weddingGuests = rootData.wedding_guests || {};
-    const unassignedGuests = rootData.unassigned_guests || [];
+// 🎯 精準唯讀 wedding_guests 節點，絕不監聽根目錄，徹底避開無效循環與格式報錯
+database.ref('wedding_guests').on('value', (snapshot) => {
+    const weddingGuests = snapshot.val();
     
-    // 避免打字時被重新渲染刷新打斷
+    // 避免工作人員喺打字或選單揀緊嘢時被重新渲染打斷
     if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
-        mergeAndRenderExcel(weddingGuests, unassignedGuests);
+        processAndRenderExcel(weddingGuests || {});
     }
 });
 
-// 🎯 合併名單並繪製
-function mergeAndRenderExcel(weddingGuests, unassignedGuests) {
+// 🎯 核心重構：完美融入畫布架構，將所有桌次（包含99未分配）打散成 Excel 清單
+function processAndRenderExcel(weddingGuests) {
     localGuestsList = [];
     tbody.innerHTML = '';
 
-    // 1. 放入有分配桌次嘅人
-    if (weddingGuests && typeof weddingGuests === 'object') {
-        Object.keys(weddingGuests).forEach(tableNum => {
-            const list = weddingGuests[tableNum];
-            if (Array.isArray(list)) {
-                list.forEach(guest => {
-                    if (guest && guest.name) {
-                        localGuestsList.push({
-                            name: guest.name,
-                            side: guest.side || '男方',
-                            group: guest.group || '未分類',
-                            table: parseInt(tableNum), 
-                            sort: guest.sort || 1
-                        });
-                    }
-                });
-            }
-        });
-    }
+    // 跑片所有桌號
+    Object.keys(weddingGuests).forEach(tableNum => {
+        const list = weddingGuests[tableNum];
+        if (Array.isArray(list)) {
+            list.forEach(guest => {
+                if (guest && guest.name) {
+                    // 判斷是否為未安排 (畫布端通常定義 99 為未分配 Pool)
+                    const isUnassigned = (tableNum === '99' || parseInt(tableNum) === 99);
+                    
+                    localGuestsList.push({
+                        name: guest.name,
+                        side: guest.side || '男方',
+                        group: guest.group || '未分類',
+                        // 如果係 99 枱，後台畫面直接顯示空白（未安排），否則顯示真實桌號
+                        table: isUnassigned ? '' : parseInt(tableNum), 
+                        sort: guest.sort || 1
+                    });
+                }
+            });
+        }
+    });
 
-    // 2. 放入無分配桌次（未安排）嘅人
-    if (Array.isArray(unassignedGuests)) {
-        unassignedGuests.forEach(guest => {
-            if (guest && guest.name) {
-                localGuestsList.push({
-                    name: guest.name,
-                    side: guest.side || '男方',
-                    group: guest.group || '未分類',
-                    table: '', // 留空代表未安排
-                    sort: 99
-                });
-            }
-        });
-    }
-
-    // 如果完全冇人，顯示一行乾淨嘅提示
+    // 如果完全冇資料，給予提示
     if (localGuestsList.length === 0) {
         tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-gray-400 font-bold">🎉 目前名單內沒有任何賓客，請點右上角「新增賓客」開始建立。</td></tr>`;
         return;
@@ -85,11 +70,11 @@ function mergeAndRenderExcel(weddingGuests, unassignedGuests) {
     renderDOMRows();
 }
 
-// 將資料繪製到畫面上
+// 將資料陣列繪製成真實 HTML 橫列
 function renderDOMRows() {
     tbody.innerHTML = '';
     
-    // 自動擴充群組清單
+    // 自動擴充群組下拉選單標籤
     localGuestsList.forEach(g => {
         if (g.group && !currentCategories.includes(g.group)) {
             currentCategories.push(g.group);
@@ -115,7 +100,7 @@ function renderDOMRows() {
             </select>
         `;
 
-        // 桌次直接改回 <input type="number">，如果無填就是空白（代表未安排）
+        // 桌次改為自由輸入框，你想打咩就打咩，空白就是未安排（儲存時會自動變回 99 塞給畫布）
         const tableInputHTML = `
             <input type="number" min="1" max="99" placeholder="未安排" value="${guest.table !== undefined && guest.table !== null ? guest.table : ''}" 
                    class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white">
@@ -139,7 +124,7 @@ function renderDOMRows() {
     });
 }
 
-// 按鈕功能：手動新增一行（桌次欄位預設一定係空白）
+// 新增賓客列（桌次預設絕對空白，不綁死任何枱號）
 function addNewGuestRow() {
     if (tbody.querySelector('td[colspan="7"]')) {
         tbody.innerHTML = '';
@@ -188,7 +173,7 @@ function addNewGuestRow() {
     scrollContainer.scrollTop = scrollContainer.scrollHeight; 
 }
 
-// 自訂分類
+// 處理自訂群組彈窗
 function handleGroupChange(selectEl) {
     if (selectEl.value === '__NEW__') {
         activeSelectElement = selectEl;
@@ -237,12 +222,10 @@ function recalculateSortNumbersFromDOM() {
     });
 }
 
-// 🎯 按鈕功能：儲存至 Firebase 
+// 🎯 儲存按鈕：完美整合相容畫布端數據格式
 function saveAllToFirebase() {
     const rows = tbody.querySelectorAll('tr');
-    
     let newWeddingGuests = {};   
-    let newUnassignedPool = [];  
 
     rows.forEach((row) => {
         const inputs = row.querySelectorAll('input');
@@ -257,42 +240,35 @@ function saveAllToFirebase() {
 
         if (!gName) return; 
 
+        // 判斷枱號：如果有填就用新枱號，如果留空「未安排」就丟進 99 枱（對接畫布左邊名單）
+        let targetTable = 99;
         if (gTableRaw !== "" && !isNaN(gTableRaw)) {
-            const tableNum = parseInt(gTableRaw);
-            if (!newWeddingGuests[tableNum]) {
-                newWeddingGuests[tableNum] = [];
-            }
-            const currentSeatCount = newWeddingGuests[tableNum].length + 1;
-
-            newWeddingGuests[tableNum].push({
-                name: gName,
-                side: gSide,
-                group: gGroup,
-                sort: currentSeatCount 
-            });
-        } else {
-            newUnassignedPool.push({
-                name: gName,
-                side: gSide,
-                group: gGroup,
-                sort: 99
-            });
+            targetTable = parseInt(gTableRaw);
         }
+
+        if (!newWeddingGuests[targetTable]) {
+            newWeddingGuests[targetTable] = [];
+        }
+        
+        const currentSeatCount = newWeddingGuests[targetTable].length + 1;
+
+        newWeddingGuests[targetTable].push({
+            name: gName,
+            side: gSide,
+            group: gGroup,
+            sort: targetTable === 99 ? 99 : currentSeatCount 
+        });
     });
 
-    const finalPayload = {
-        wedding_guests: newWeddingGuests,
-        unassigned_guests: newUnassignedPool
-    };
-
-    database.ref().update(finalPayload).then(() => {
-        alert("✨ 【後台數據同步成功】！\n所有修改與排序已即時同步至前台與畫布。");
+    // 🌟 只覆蓋更新 wedding_guests 節點，其他狀態原封不動，絕對安全安全穩陣！
+    database.ref('wedding_guests').set(newWeddingGuests).then(() => {
+        alert("✨ 【數據同步成功】！\n後台 Excel 的名單與自訂桌次已完美同步至畫布。");
     }).catch(err => {
         alert("❌ 儲存失敗: " + err.message);
     });
 }
 
-// 匯出成 CSV
+// CSV 導出
 function exportToCSV() {
     if (localGuestsList.length === 0) { alert("目前沒有數據可導出！"); return; }
     
@@ -322,7 +298,7 @@ function exportToCSV() {
     document.body.removeChild(link);
 }
 
-// CSV 匯入邏輯
+// CSV 匯入
 function importCSVAction() {
     const fileInput = document.getElementById('csv-file-input');
     const file = fileInput.files[0];
@@ -363,7 +339,7 @@ function importCSVAction() {
     reader.readAsText(file, 'UTF-8');
 }
 
-// 安全限制與 iPhone 鎖定功能
+// 鎖定 iPhone 行為與右鍵阻擋
 (function() {
     let adminLastTouchEnd = 0;
     document.addEventListener('touchstart', function (event) {
