@@ -51,7 +51,7 @@
             width: 100%;
         }
 
-        /* 🎯 完美收合：側邊欄收縮，內部元件完全隱藏，絕不溢出半透明殘留 */
+        /* 完美收合 */
         #sidebar-panel {
             width: 320px;
             transition: width 0.3s ease-in-out, opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
@@ -97,18 +97,19 @@
 
     <div class="flex flex-1 overflow-hidden w-full relative bg-slate-100">
         
-        <div class="relative shrink-0 z-20 flex h-full">
-            <aside id="sidebar-panel" class="bg-white border-r border-slate-200 flex flex-col h-full shadow-xl overflow-hidden">
+        <div class="relative shrink-0 z-20 flex h-full" ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
+            <aside id="sidebar-panel" class="bg-white border-r border-slate-200 flex flex-col h-full shadow-xl overflow-hidden" ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
+                
                 <div class="p-4 bg-white shrink-0 w-[320px]">
                     <h2 class="text-xl font-black text-slate-800 tracking-wide mb-3">未安排</h2>
                     
-                    <div class="flex bg-slate-100 p-1 rounded-xl text-xs font-bold border border-slate-200/60">
-                        <button onclick="setSideFilter('男方')" id="filter-male" class="flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition-all text-center">男方</button>
-                        <button onclick="setSideFilter('女方')" id="filter-female" class="flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition-all text-center">女方</button>
+                    <div class="flex flex-col gap-1.5 text-xs font-bold">
+                        <button onclick="setSideFilter('男方')" id="filter-male" class="w-full py-2.5 rounded-xl text-center transition-all">男方</button>
+                        <button onclick="setSideFilter('女方')" id="filter-female" class="w-full py-2.5 rounded-xl text-center transition-all">女方</button>
                     </div>
                 </div>
 
-                <div class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50 no-scrollbar w-[320px]" id="unassigned-pool"></div>
+                <div class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50 no-scrollbar w-[320px]" id="unassigned-pool" ondragover="allowDrop(event)" ondrop="handleDropTrash(event)"></div>
             </aside>
 
             <button onclick="toggleSidebar()" class="absolute left-full top-1/2 -translate-y-1/2 w-5 h-20 bg-indigo-600 text-white border border-indigo-500 rounded-r-xl shadow-md flex items-center justify-center font-black text-[10px] hover:bg-indigo-700 transition-all z-50">

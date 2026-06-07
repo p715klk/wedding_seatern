@@ -7,7 +7,6 @@ const database = firebase.database();
 let allGuests = [];         
 let unassignedPool = [];    
 let tableSettings = {};     
-// 🎯 預設跟鷗鷗一樣直接選中「男方」
 let currentSideFilter = '男方';
 let activeSettingTableNum = null;
 let selectedGuestContext = null;
@@ -133,13 +132,12 @@ function updateGlobalStats() {
     document.getElementById('global-stats').innerText = `已排位: ${assigned} / 總人數: ${total}`;
 }
 
-// 🎯 核心：精簡男女方切換高亮
 function setSideFilter(side) {
     currentSideFilter = side;
     renderSidebar();
 }
 
-// 🎯 核心：對齊鷗鷗版面渲染
+// 🎯 更新上下分欄按鈕樣式與渲染
 function renderSidebar() {
     const poolContainer = document.getElementById('unassigned-pool');
     if (!poolContainer) return;
@@ -150,11 +148,11 @@ function renderSidebar() {
     
     if (btnMale && btnFemale) {
         if (currentSideFilter === '男方') {
-            btnMale.className = "flex-1 py-2 rounded-lg bg-blue-600 text-white font-bold shadow-sm text-center transition-all";
-            btnFemale.className = "flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 text-center transition-all";
+            btnMale.className = "w-full py-2.5 rounded-xl bg-blue-600 text-white font-bold shadow-sm border border-blue-500 text-center transition-all";
+            btnFemale.className = "w-full py-2.5 rounded-xl text-slate-500 bg-slate-50 border border-slate-200 hover:text-slate-800 text-center transition-all";
         } else {
-            btnMale.className = "flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 text-center transition-all";
-            btnFemale.className = "flex-1 py-2 rounded-lg bg-rose-600 text-white font-bold shadow-sm text-center transition-all";
+            btnMale.className = "w-full py-2.5 rounded-xl text-slate-500 bg-slate-50 border border-slate-200 hover:text-slate-800 text-center transition-all";
+            btnFemale.className = "w-full py-2.5 rounded-xl bg-rose-600 text-white font-bold shadow-sm border border-rose-500 text-center transition-all";
         }
     }
 
@@ -422,12 +420,17 @@ function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
     } catch (err) { console.error(err); }
 }
 
+// 🎯 核心修復：當由畫布拉賓客扔進 Side Panel 任何位置時觸發退回 Pool
 function handleDropTrash(e) {
     e.preventDefault();
     try {
-        const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+        const dataStr = e.dataTransfer.getData('text/plain');
+        if (!dataStr) return;
+        const data = JSON.parse(dataStr);
         const { fromTable, seatIndex } = data;
-        if (fromTable === "POOL") return;
+        
+        // 如果係由 Pool 自己拉去 Pool 就唔使理
+        if (!fromTable || fromTable === "POOL") return;
 
         const fromTableIdx = parseInt(fromTable);
         const foundIdx = allGuests[fromTableIdx].findIndex(g => g && g.sort === (seatIndex + 1));
@@ -435,7 +438,11 @@ function handleDropTrash(e) {
         if (foundIdx !== -1) {
             let movingGuestObj = allGuests[fromTableIdx][foundIdx];
             allGuests[fromTableIdx].splice(foundIdx, 1);
+            
+            // 標記為未安排狀態
             movingGuestObj.sort = 99;
+            
+            if (!unassignedPool) unassignedPool = [];
             unassignedPool.push(movingGuestObj);
 
             const updates = {};
@@ -469,7 +476,6 @@ function openSettingsModal(tableNum, currentMax) {
     document.getElementById('table-settings-modal').classList.remove('hidden');
 }
 
-// 關閉桌設定 Modal
 function closeSettingsModal() {
     document.getElementById('table-settings-modal').classList.add('hidden');
     activeSettingTableNum = null;
