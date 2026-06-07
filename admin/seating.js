@@ -7,12 +7,11 @@ const database = firebase.database();
 let allGuests = [];         
 let unassignedPool = [];    
 let tableSettings = {};     
-let currentSideFilter = '男方';
 let activeSettingTableNum = null;
 let selectedGuestContext = null;
 
 // ==========================================
-// 📌 畫布初始化與平移縮放
+// 📌 畫布初始化與平移縮放 (已完美修復空白處拉唔郁問題)
 // ==========================================
 let zoom = 0.8; 
 let panX = -900;  
@@ -44,8 +43,17 @@ viewport.addEventListener('wheel', (e) => {
     applyTransform();
 }, { passive: false });
 
+// 🎯 精確鎖定：只有點擊「白圈圓心」或「賓客名牌」先會觸發功能，點擊大正方形透明區域一律允許拖曳畫布！
 viewport.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.draggable-table') || e.target.closest('.seat-slot') || e.target.closest('button') || e.target.closest('input') || e.target.closest('select')) return;
+    const isSeat = e.target.closest('.seat-slot');
+    const isCenterCircle = e.target.closest('.w-40.h-40'); // 圓枱中間個白圈
+    const isInteractive = e.target.closest('button, input, select');
+
+    if (isSeat || isCenterCircle || isInteractive) {
+        return; // 這些元件維持原有操作或圓枱拖曳
+    }
+
+    // 點擊其餘任何地方（包括隱形透明邊界）一律當作拉動整個畫布
     isPanning = true;
     viewport.style.cursor = 'grabbing';
     startX = e.clientX - panX;
@@ -132,48 +140,55 @@ function updateGlobalStats() {
     document.getElementById('global-stats').innerText = `已排位: ${assigned} / 總人數: ${total}`;
 }
 
-function setSideFilter(side) {
-    currentSideFilter = side;
-    renderSidebar();
-}
-
-// 🎯 更新上下分欄按鈕樣式與渲染
+// 🎯 核心重構：同時獨立渲染男方與女方上下分欄名單
 function renderSidebar() {
-    const poolContainer = document.getElementById('unassigned-pool');
-    if (!poolContainer) return;
-    poolContainer.innerHTML = '';
-
-    const btnMale = document.getElementById('filter-male');
-    const btnFemale = document.getElementById('filter-female');
+    const maleContainer = document.getElementById('pool-male');
+    const femaleContainer = document.getElementById('pool-female');
+    if (!maleContainer || !femaleContainer) return;
     
-    if (btnMale && btnFemale) {
-        if (currentSideFilter === '男方') {
-            btnMale.className = "w-full py-2.5 rounded-xl bg-blue-600 text-white font-bold shadow-sm border border-blue-500 text-center transition-all";
-            btnFemale.className = "w-full py-2.5 rounded-xl text-slate-500 bg-slate-50 border border-slate-200 hover:text-slate-800 text-center transition-all";
-        } else {
-            btnMale.className = "w-full py-2.5 rounded-xl text-slate-500 bg-slate-50 border border-slate-200 hover:text-slate-800 text-center transition-all";
-            btnFemale.className = "w-full py-2.5 rounded-xl bg-rose-600 text-white font-bold shadow-sm border border-rose-500 text-center transition-all";
-        }
-    }
+    maleContainer.innerHTML = '';
+    femaleContainer.innerHTML = '';
 
-    const cleanPool = unassignedPool.filter(g => g && g.name && g.side === currentSideFilter);
+    let maleGroups = {};
+    let femaleGroups = {};
+    let maleCount = 0;
+    let femaleCount = 0;
 
-    if (cleanPool.length === 0) {
-        poolContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-12 font-medium">🎉 該類別暫無未安排賓客</div>`;
-        return;
-    }
-
-    let groups = {};
     unassignedPool.forEach((guest, index) => {
-        if (!guest || !guest.name || guest.side !== currentSideFilter) return;
+        if (!guest || !guest.name) return;
         const gName = guest.group || "未分類";
-        if (!groups[gName]) groups[gName] = [];
-        groups[gName].push({ data: guest, originalIndex: index });
+        
+        if (guest.side === '男方') {
+            maleCount++;
+            if (!maleGroups[gName]) maleGroups[gName] = [];
+            maleGroups[gName].push({ data: guest, originalIndex: index });
+        } else {
+            femaleCount++;
+            if (!femaleGroups[gName]) femaleGroups[gName] = [];
+            femaleGroups[gName].push({ data: guest, originalIndex: index });
+        }
     });
 
+    // 渲染男方
+    if (maleCount === 0) {
+        maleContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-8 font-medium">🎉 男方已全數安排</div>`;
+    } else {
+        renderGroupData(maleGroups, maleContainer);
+    }
+
+    // 渲染女方
+    if (femaleCount === 0) {
+        femaleContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-8 font-medium">🎉 女方已全數安排</div>`;
+    } else {
+        renderGroupData(femaleGroups, femaleContainer);
+    }
+}
+
+// 輔助函式：產生分組卡片與名牌
+function renderGroupData(groups, container) {
     Object.keys(groups).forEach(groupName => {
         const groupWrap = document.createElement('div');
-        groupWrap.className = "bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm";
+        groupWrap.className = "bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm w-full";
         groupWrap.innerHTML = `<h4 class="text-[11px] font-bold text-slate-400 mb-2.5 border-b border-slate-100 pb-1">🏷️ ${groupName}</h4>`;
         
         const chipsContainer = document.createElement('div');
@@ -192,7 +207,7 @@ function renderSidebar() {
             chipsContainer.appendChild(chip);
         });
         groupWrap.appendChild(chipsContainer);
-        poolContainer.appendChild(groupWrap);
+        container.appendChild(groupWrap);
     });
 }
 
@@ -220,7 +235,7 @@ function renderCanvasTables() {
         tableWrapper.setAttribute('data-table', tableNum);
 
         const innerCircle = document.createElement('div');
-        innerCircle.className = "w-40 h-40 rounded-full bg-white border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.05)] flex flex-col items-center justify-center relative z-10 select-none";
+        innerCircle.className = "w-40 h-40 rounded-full bg-white border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.05)] flex flex-col items-center justify-center relative z-10 select-none cursor-grab";
         innerCircle.innerHTML = `
             <div class="text-[10px] uppercase font-bold tracking-widest text-slate-400">TABLE</div>
             <div class="text-3xl font-black text-slate-800 my-0.5">${tableNum}</div>
@@ -235,8 +250,10 @@ function renderCanvasTables() {
             openSettingsModal(tableNum, maxSeats);
         };
 
+        // 按住中間白圈可以拖曳圓枱
         innerCircle.onmousedown = (e) => {
             if (e.target.tagName === 'BUTTON') return;
+            e.stopPropagation();
             isDraggingTable = true;
             draggedTableElement = tableWrapper;
             tableOffsetX = (e.clientX / zoom) - tableWrapper.offsetLeft;
@@ -420,7 +437,6 @@ function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
     } catch (err) { console.error(err); }
 }
 
-// 🎯 核心修復：當由畫布拉賓客扔進 Side Panel 任何位置時觸發退回 Pool
 function handleDropTrash(e) {
     e.preventDefault();
     try {
@@ -429,7 +445,6 @@ function handleDropTrash(e) {
         const data = JSON.parse(dataStr);
         const { fromTable, seatIndex } = data;
         
-        // 如果係由 Pool 自己拉去 Pool 就唔使理
         if (!fromTable || fromTable === "POOL") return;
 
         const fromTableIdx = parseInt(fromTable);
@@ -439,7 +454,6 @@ function handleDropTrash(e) {
             let movingGuestObj = allGuests[fromTableIdx][foundIdx];
             allGuests[fromTableIdx].splice(foundIdx, 1);
             
-            // 標記為未安排狀態
             movingGuestObj.sort = 99;
             
             if (!unassignedPool) unassignedPool = [];
