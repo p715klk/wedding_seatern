@@ -18,7 +18,7 @@
             background-image: radial-gradient(#cbd5e1 1.5px, transparent 1.5px);
             background-size: 20px 20px;
             position: absolute;
-            width: 5000px; /* 加大畫布 */
+            width: 5000px;
             height: 4000px;
             transform-origin: 0 0;
             cursor: grab;
@@ -29,7 +29,7 @@
             position: absolute;
             transform: translate(-50%, -50%);
         }
-        /* 賓客名牌：解決交疊與字數過長問題 */
+        /* 賓客名牌定寬不交疊 */
         .guest-chip-fixed {
             width: 82px;
             height: 32px;
@@ -52,7 +52,14 @@
             text-overflow: ellipsis;
             width: 100%;
         }
-        #sidebar-panel.collapsed { transform: translateX(-100%); }
+        /* 修正空白問題：用 width 做 transition 確保右邊自動填滿 */
+        #sidebar-panel {
+            transition: width 0.3s ease-out;
+        }
+        #sidebar-panel.collapsed {
+            width: 0px;
+            border-right-width: 0px;
+        }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
@@ -65,9 +72,6 @@
                 <span class="text-xl">🦢</span> SEATING OOO
             </h1>
             <div class="text-[11px] bg-slate-100 px-2.5 py-1 rounded-full text-slate-600 font-bold" id="global-stats">載入中...</div>
-            <div class="text-[10px] text-slate-400 font-medium hidden lg:block bg-slate-50 border border-slate-200/60 px-2 py-0.5 rounded">
-                🖱️ 直接滾動縮放畫布 | 按住空白鍵或滑鼠拖拽畫布空白處可平移視角
-            </div>
         </div>
         <div class="flex items-center gap-2">
             <div class="flex items-center bg-slate-50 border border-slate-200 rounded-lg overflow-hidden h-8 mr-1 text-xs">
@@ -86,18 +90,19 @@
 
     <div class="flex flex-1 overflow-hidden w-full relative bg-slate-100">
         
-        <aside id="sidebar-panel" class="absolute lg:relative top-0 bottom-0 left-0 w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-xl z-20 transition-transform duration-300 ease-out"
+        <aside id="sidebar-panel" class="relative w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-xl z-20"
                ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
             
-            <button onclick="toggleSidebar()" class="absolute -right-5 top-1/2 -translate-y-1/2 w-6 h-20 bg-indigo-600 text-white border border-indigo-500 rounded-r-xl shadow-lg flex items-center justify-center font-black text-xs hover:bg-indigo-700 transition-all z-50" title="展開/收合名單">
+            <button onclick="toggleSidebar()" class="absolute -right-5 top-1/2 -translate-y-1/2 w-6 h-20 bg-indigo-600 text-white border border-indigo-500 rounded-r-xl shadow-lg flex items-center justify-center font-black text-xs hover:bg-indigo-700 transition-all z-50">
                 <span id="sidebar-toggle-icon">◀</span>
             </button>
             
-            <div class="p-4 border-b border-slate-100 bg-slate-50/80">
+            <div class="p-4 border-b border-slate-100 bg-slate-50/80 overflow-hidden min-w-[320px]">
                 <div class="flex items-center justify-between mb-2">
-                    <h2 class="text-xs font-black tracking-wider text-slate-500 uppercase flex items-center gap-1">📋 未安排賓客</h2>
+                    <h2 class="text-sm font-black tracking-wider text-slate-800 flex items-center gap-1">❌ 未安排</h2>
                     <span id="unassigned-count" class="text-[10px] bg-slate-200 px-2 py-0.5 rounded-full font-bold text-slate-600">0人</span>
                 </div>
+                
                 <input type="text" id="sidebar-search" oninput="renderSidebar()" placeholder="搜尋姓名、群組..." 
                        class="w-full p-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white mb-2.5">
                 
@@ -108,7 +113,7 @@
                 </div>
             </div>
 
-            <div class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/40 no-scrollbar" id="unassigned-pool"></div>
+            <div class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/40 no-scrollbar min-w-[320px]" id="unassigned-pool"></div>
         </aside>
 
         <main class="flex-1 relative overflow-hidden" id="canvas-viewport">
@@ -120,18 +125,38 @@
     <div id="guest-detail-modal" class="fixed inset-0 bg-slate-950/40 z-50 hidden flex items-center justify-center p-4">
         <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-slate-100">
             <div class="flex justify-between items-start mb-3">
-                <h3 class="text-base font-black text-slate-900">🔍 賓客席位資訊</h3>
+                <h3 class="text-sm font-black text-slate-900">✏️ 編輯賓客資料</h3>
                 <button onclick="closeGuestModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
             </div>
-            <div class="space-y-2.5 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
-                <div class="flex justify-between"><span class="text-slate-400">姓名:</span> <span id="md-guest-name" class="font-bold text-slate-800"></span></div>
-                <div class="flex justify-between"><span class="text-slate-400">群組:</span> <span id="md-guest-group" class="font-bold text-indigo-600"></span></div>
-                <div class="flex justify-between"><span class="text-slate-400">來源:</span> <span id="md-guest-side" class="font-bold text-slate-700"></span></div>
-                <div class="flex justify-between"><span class="text-slate-400">目前座位:</span> <span id="md-guest-seat" class="font-mono bg-amber-100 px-1.5 py-0.5 rounded text-amber-800 font-bold"></span></div>
+            
+            <div class="space-y-3 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1">姓名：</label>
+                    <input type="text" id="edit-guest-name" class="w-full border border-slate-200 rounded-lg p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1">群組分類：</label>
+                    <input type="text" id="edit-guest-group" class="w-full border border-slate-200 rounded-lg p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1">來源：</label>
+                    <select id="edit-guest-side" class="w-full border border-slate-200 rounded-lg p-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                        <option value="男方">男方</option>
+                        <option value="女方">女方</option>
+                    </select>
+                </div>
+                <div class="flex justify-between items-center pt-1">
+                    <span class="text-slate-400 font-bold">目前席位：</span> 
+                    <span id="md-guest-seat" class="font-mono bg-amber-100 px-2 py-0.5 rounded text-amber-800 font-bold"></span>
+                </div>
             </div>
-            <div class="flex justify-end gap-2 mt-5 pt-3 border-t border-slate-100">
-                <button onclick="removeGuestFromSeatAction()" class="w-full py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1">
-                    ↩️ 移出此座位 (退回名單)
+            
+            <div class="space-y-2 mt-4">
+                <button onclick="saveGuestChangesAction()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition">
+                    💾 儲存並更新資料
+                </button>
+                <button onclick="removeGuestFromSeatAction()" class="w-full py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-bold transition">
+                    ↩️ 移出席位 (退回未安排)
                 </button>
             </div>
         </div>

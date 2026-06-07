@@ -14,10 +14,10 @@ let activeSettingTableNum = null;
 let selectedGuestContext = null;
 
 // ==========================================
-// 📌 核心一：畫布初始化絕對居中 (解決偏左上問題)
+// 📌 核心一：畫布初始化居中
 // ==========================================
 let zoom = 0.8; 
-let panX = -900;  // 預設將 5000px 畫布的中心推向畫面中央
+let panX = -900;  
 let panY = -600;
 let isPanning = false;
 let startX, startY;
@@ -30,7 +30,6 @@ function applyTransform() {
     document.getElementById('zoom-percent').innerText = `${Math.round(zoom * 100)}%`;
 }
 
-// 滾輪直接縮放
 viewport.addEventListener('wheel', (e) => {
     e.preventDefault();
     const zoomFactor = 1.08;
@@ -47,9 +46,8 @@ viewport.addEventListener('wheel', (e) => {
     applyTransform();
 }, { passive: false });
 
-// 畫布拖拽平移
 viewport.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.draggable-table') || e.target.closest('.seat-slot') || e.target.closest('button')) return;
+    if (e.target.closest('.draggable-table') || e.target.closest('.seat-slot') || e.target.closest('button') || e.target.closest('input') || e.target.closest('select')) return;
     isPanning = true;
     viewport.style.cursor = 'grabbing';
     startX = e.clientX - panX;
@@ -74,7 +72,9 @@ function zoomCanvas(factor) {
     applyTransform();
 }
 
-// 側邊欄開合
+// ==========================================
+// 📌 核心二：完美收合側邊欄 (修復空白無填滿問題)
+// ==========================================
 let isSidebarOpen = true;
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar-panel');
@@ -95,7 +95,7 @@ let draggedTableElement = null;
 let tableOffsetX = 0;
 let tableOffsetY = 0;
 
-// Firebase 實時資料流
+// Firebase 實時數據監聽
 database.ref().on('value', (snapshot) => {
     const root = snapshot.val() || {};
     allGuests = root.wedding_guests || [];
@@ -103,7 +103,6 @@ database.ref().on('value', (snapshot) => {
     tableSettings = root.table_settings || {};
 
     let updatedSettings = false;
-    // 將 1-14 桌初始化在 5000x4000 畫布的中央區塊（X: 2000~3200, Y: 1500~2300）
     for(let i = 1; i <= 14; i++) {
         if (!tableSettings[i]) {
             const row = Math.floor((i - 1) / 4);
@@ -198,9 +197,6 @@ function renderSidebar() {
     });
 }
 
-// ==========================================
-// 📌 核心二：改進圓枱渲染 (防止重疊名字)
-// ==========================================
 function renderCanvasTables() {
     const sortedTableNums = Object.keys(tableSettings).sort((a,b) => parseInt(a) - parseInt(b));
     document.querySelectorAll('.draggable-table').forEach(el => el.remove());
@@ -219,12 +215,11 @@ function renderCanvasTables() {
         });
 
         const tableWrapper = document.createElement('div');
-        tableWrapper.className = "draggable-table w-96 h-96 flex items-center justify-center"; // 擴大外框
+        tableWrapper.className = "draggable-table w-96 h-96 flex items-center justify-center"; 
         tableWrapper.style.left = `${settings.x}px`;
         tableWrapper.style.top = `${settings.y}px`;
         tableWrapper.setAttribute('data-table', tableNum);
 
-        // 枱中心圈
         const innerCircle = document.createElement('div');
         innerCircle.className = "w-40 h-40 rounded-full bg-white border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.05)] flex flex-col items-center justify-center relative z-10 select-none";
         innerCircle.innerHTML = `
@@ -250,12 +245,11 @@ function renderCanvasTables() {
             tableWrapper.style.zIndex = 1000;
         };
 
-        // 🎯 核心修正：將半徑加闊至 135px 完美拉開人名，不再重疊
         for (let i = 0; i < maxSeats; i++) {
             const seatSlot = document.createElement('div');
             const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
             const radius = 135; 
-            const x = 192 + radius * Math.cos(angle); // 192 係外框 392的一半
+            const x = 192 + radius * Math.cos(angle); 
             const y = 192 + radius * Math.sin(angle);
 
             seatSlot.style.left = `${x}px`;
@@ -264,12 +258,10 @@ function renderCanvasTables() {
             const guest = seatSlotsArray[i];
 
             if (guest) {
-                // 定寬度、超出顯示 ... 懸停看完整人名的精緻貼紙
                 seatSlot.className = `seat-slot guest-chip-fixed text-white ${guest.side === '女方' ? 'bg-rose-400 shadow-rose-200' : 'bg-blue-400 shadow-blue-200'}`;
                 seatSlot.innerHTML = `<span class="text-ellipsis" title="${guest.name}">${guest.name}</span>`;
                 seatSlot.setAttribute('draggable', 'true');
 
-                // 點擊事件：跳出詳細資訊改動視窗
                 seatSlot.addEventListener('click', (e) => {
                     e.stopPropagation();
                     openGuestModal(guest, tableNum, i);
@@ -295,7 +287,6 @@ function renderCanvasTables() {
     });
 }
 
-// 畫布物件移動監聽
 document.addEventListener('mousemove', (e) => {
     if (!isDraggingTable || !draggedTableElement) return;
     let x = (e.clientX / zoom) - tableOffsetX;
@@ -322,13 +313,16 @@ document.addEventListener('mouseup', () => {
 function allowDrop(e) { e.preventDefault(); }
 
 // ==========================================
-// 📌 核心三：點擊人名彈窗詳細資訊與更正功能
+// 📌 核心三：Edit & Update 資訊更正儲存功能
 // ==========================================
 function openGuestModal(guest, tableNum, seatIdx) {
     selectedGuestContext = { guest, tableNum, seatIdx };
-    document.getElementById('md-guest-name').innerText = guest.name;
-    document.getElementById('md-guest-group').innerText = guest.group || '無';
-    document.getElementById('md-guest-side').innerText = guest.side || '未指定';
+    
+    // 把資料塞入 Input / Select 中供用家自由修改
+    document.getElementById('edit-guest-name').value = guest.name;
+    document.getElementById('edit-guest-group').value = guest.group || '';
+    document.getElementById('edit-guest-side').value = guest.side === '女方' ? '女方' : '男方';
+    
     document.getElementById('md-guest-seat').innerText = `第 ${tableNum} 桌 - 座位 ${seatIdx + 1}`;
     document.getElementById('guest-detail-modal').classList.remove('hidden');
 }
@@ -338,7 +332,32 @@ function closeGuestModal() {
     selectedGuestContext = null;
 }
 
-// 一鍵移出席位功能
+// 實作彈窗修改並寫入 Firebase 嘅 Update 按鈕
+function saveGuestChangesAction() {
+    if (!selectedGuestContext) return;
+    const { tableNum, seatIdx } = selectedGuestContext;
+    const tableIdx = parseInt(tableNum);
+
+    const newName = document.getElementById('edit-guest-name').value.trim();
+    const newGroup = document.getElementById('edit-guest-group').value.trim();
+    const newSide = document.getElementById('edit-guest-side').value;
+
+    if (!newName) { alert("❌ 姓名不能為空！"); return; }
+
+    // 搵出目前圓枱陣列入面嘅嗰位賓客
+    const foundIdx = allGuests[tableIdx].findIndex(g => g && g.sort === (seatIdx + 1));
+    if (foundIdx !== -1) {
+        allGuests[tableIdx][foundIdx].name = newName;
+        allGuests[tableIdx][foundIdx].group = newGroup;
+        allGuests[tableIdx][foundIdx].side = newSide;
+
+        // 同步寫入數據庫
+        database.ref(`wedding_guests/${tableIdx}`).set(allGuests[tableIdx]).then(() => {
+            closeGuestModal();
+        });
+    }
+}
+
 function removeGuestFromSeatAction() {
     if (!selectedGuestContext) return;
     const { tableNum, seatIdx } = selectedGuestContext;
@@ -348,7 +367,7 @@ function removeGuestFromSeatAction() {
     if (foundIdx !== -1) {
         let guestObj = allGuests[tableIdx][foundIdx];
         allGuests[tableIdx].splice(foundIdx, 1);
-        guestObj.sort = 99; // 重置排序
+        guestObj.sort = 99; 
 
         if (!unassignedPool) unassignedPool = [];
         unassignedPool.push(guestObj);
@@ -357,13 +376,11 @@ function removeGuestFromSeatAction() {
         updates['wedding_guests'] = allGuests;
         updates['unassigned_guests'] = unassignedPool;
         
-        database.ref().update(updates).then(() => {
-            closeGuestModal();
-        });
+        database.ref().update(updates).then(() => { closeGuestModal(); });
     }
 }
 
-// 處理放置邏輯
+// 處理放置
 function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
     e.preventDefault();
     e.stopPropagation();
@@ -444,10 +461,9 @@ function createNewTableAction() {
     const cleanNum = newNum.trim();
 
     if (tableSettings[cleanNum]) { alert("❌ 此桌號已存在！"); return; }
-    const maxSeats = prompt(`請輸入第 ${cleanNum} 桌的人上限：`, "12");
+    const maxSeats = prompt(`請輸入第 ${cleanNum} 桌的人數上限：`, "12");
     const cleanMax = parseInt(maxSeats) || 12;
 
-    // 直接生成在目前視角的可視正中間
     database.ref(`table_settings/${cleanNum}`).set({
         max_seats: cleanMax,
         x: Math.abs(panX) + 300,
@@ -467,6 +483,7 @@ function closeSettingsModal() {
     activeSettingTableNum = null;
 }
 
+// 枱設定
 function saveTableSettingsAction() {
     if (!activeSettingTableNum) return;
     const newMax = parseInt(document.getElementById('modal-max-seats').value) || 12;
