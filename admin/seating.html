@@ -14,42 +14,57 @@
             background-image: radial-gradient(#cbd5e1 1.5px, transparent 1.5px);
             background-size: 24px 24px;
             position: relative;
-            width: 2500px; /* 超大畫布，可以自由排佈 14 張枱 */
-            height: 2000px;
+            width: 3000px; /* 大畫布 */
+            height: 2500px;
+            transform-origin: 0 0; /* 縮放核心設定 */
+            transition: transform 0.05s ease-out;
         }
         /* 可拖動的圓枱卡片 */
         .draggable-table {
             position: absolute;
             cursor: move;
-            transition: box-shadow 0.2s;
             user-select: none;
-        }
-        .draggable-table:active {
-            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
         }
         /* 圓形座位定位 */
         .seat-slot {
             position: absolute;
             transform: translate(-50%, -50%);
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s ease;
         }
-        .guest-chip {
-            cursor: grab;
+        /* 賓客名字高顏值貼紙 */
+        .guest-chip-on-seat {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            text-shadow: 0 1px 1px rgba(0,0,0,0.1);
+            animation: popIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
-        .guest-chip:active {
-            cursor: grabbing;
+        @keyframes popIn {
+            0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
         }
+        /* 隱藏 Scrollbar 但保留滾動功能 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-800 font-sans h-screen flex flex-col select-none overflow-hidden">
 
-    <header class="bg-slate-800 text-white p-4 shadow-lg flex justify-between items-center shrink-0 border-b border-slate-700">
+    <header class="bg-slate-800 text-white p-4 shadow-lg flex justify-between items-center shrink-0 border-b border-slate-700 z-30">
         <div class="flex items-center gap-4">
-            <h1 class="text-lg font-black tracking-wider text-amber-400 flex items-center gap-2">🦢 SEATING OOO (高級自製鷗鷗)</h1>
-            <div class="text-xs bg-slate-700 px-2 py-1 rounded text-slate-300 font-mono" id="global-stats">載入中...</div>
+            <button onclick="toggleSidebar()" class="bg-slate-700 hover:bg-slate-600 text-amber-400 p-2 rounded-lg text-sm font-black transition flex items-center gap-1">
+                <span id="sidebar-toggle-icon">◀</span> 側邊欄
+            </button>
+            <h1 class="text-lg font-black tracking-wider text-amber-400 flex items-center gap-2">🦢 SEATING OOO</h1>
+            <div class="text-xs bg-slate-700 px-2.5 py-1 rounded-full text-slate-300 font-mono" id="global-stats">載入中...</div>
+            <div class="text-xs text-slate-400 hidden sm:block">💡 提示：按住 <kbd class="bg-slate-700 px-1 rounded text-white text-[10px]">Ctrl</kbd> + 滾輪可放大縮小畫布</div>
         </div>
         <div class="flex gap-2">
+            <div class="flex items-center bg-slate-700 rounded-lg overflow-hidden border border-slate-600 mr-2">
+                <button onclick="zoomCanvas(0.9)" class="px-2 py-1 text-xs hover:bg-slate-600 font-black text-slate-300">➖</button>
+                <span id="zoom-percent" class="px-2 text-xs font-mono text-amber-400 font-bold min-w-[45px] text-center">100%</span>
+                <button onclick="zoomCanvas(1.1)" class="px-2 py-1 text-xs hover:bg-slate-600 font-black text-slate-300">➕</button>
+                <button onclick="resetZoomAction()" class="px-2 py-1 text-[10px] bg-slate-600 hover:bg-slate-500 text-white">Reset</button>
+            </div>
             <button onclick="createNewTableAction()" class="bg-amber-500 hover:bg-amber-600 text-slate-950 px-3 py-1.5 rounded-lg text-xs font-black shadow transition">
                 ➕ 新增圓枱
             </button>
@@ -62,26 +77,30 @@
         </div>
     </header>
 
-    <div class="flex flex-1 overflow-hidden w-full">
+    <div class="flex flex-1 overflow-hidden w-full relative">
         
-        <aside class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-hidden shadow-xl z-20"
-       ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
-    
-    <div class="p-4 border-b border-slate-100 bg-slate-50">
-        <input type="text" id="sidebar-search" oninput="renderSidebar()" placeholder="搜尋未入座賓客..." 
-               class="w-full p-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white">
-        
-        <div class="flex gap-1 mt-2 text-[11px]">
-            <button onclick="setSideFilter('all')" id="filter-all" class="flex-1 py-1 rounded bg-slate-700 text-white font-bold">全部</button>
-            <button onclick="setSideFilter('男方')" id="filter-male" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold">男方</button>
-            <button onclick="setSideFilter('女方')" id="filter-female" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold">女方</button>
-        </div>
-    </div>
+        <aside id="sidebar-panel" class="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-hidden shadow-2xl z-20 transition-all duration-300"
+               ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
+            
+            <div class="p-4 border-b border-slate-100 bg-slate-50">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-xs font-black tracking-wider text-slate-400 uppercase">📋 未安排賓客名單</h2>
+                    <span id="unassigned-count" class="text-[10px] bg-slate-200 px-2 py-0.5 rounded-full font-bold text-slate-600">0人</span>
+                </div>
+                <input type="text" id="sidebar-search" oninput="renderSidebar()" placeholder="搜尋未入座賓客姓名或群組..." 
+                       class="w-full p-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white mb-2.5 shadow-inner">
+                
+                <div class="flex gap-1 text-[11px]">
+                    <button onclick="setSideFilter('all')" id="filter-all" class="flex-1 py-1 rounded bg-slate-700 text-white font-bold transition">全部</button>
+                    <button onclick="setSideFilter('男方')" id="filter-male" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold transition">男方</button>
+                    <button onclick="setSideFilter('女方')" id="filter-female" class="flex-1 py-1 rounded bg-slate-100 text-slate-600 font-bold transition">女方</button>
+                </div>
+            </div>
 
-    <div class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/50" id="unassigned-pool">
-        <p class="text-center text-slate-400 text-xs py-4">名單加載中...</p>
-    </div>
-</aside>
+            <div class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/50 no-scrollbar" id="unassigned-pool">
+                <p class="text-center text-slate-400 text-xs py-4">名單加載中...</p>
+            </div>
+        </aside>
 
         <main class="flex-1 overflow-auto bg-slate-100 relative" id="canvas-scroll-container">
             <div class="workspace-canvas" id="main-canvas" ondragover="allowDrop(event)">
