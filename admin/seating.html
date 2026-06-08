@@ -187,6 +187,36 @@
         }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        #canvas-viewport { touch-action: none; cursor: grab; }
+        #canvas-viewport:active { cursor: grabbing; }
+
+        .guest-drag-ghost {
+            position: fixed;
+            z-index: 9999;
+            pointer-events: none;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: #bfdbfe;
+            color: #1e3a8a;
+            font-size: 12px;
+            font-weight: 700;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+            transform: translate(-50%, -50%);
+            max-width: 120px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        @media (max-width: 768px) {
+            #sidebar-panel { width: min(88vw, 300px); }
+            #sidebar-content { width: min(88vw, 300px) !important; }
+            .header-actions .hide-mobile { display: none; }
+            #global-stats { display: none; }
+            header h1 span:last-child { font-size: 0.85rem; }
+            .pool-guest-chip { font-size: 15px !important; padding: 12px 10px !important; }
+        }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
@@ -198,20 +228,20 @@
             </h1>
             <div class="text-[11px] bg-slate-100 px-2.5 py-1 rounded-full text-slate-600 font-bold" id="global-stats">載入中...</div>
         </div>
-        <div class="flex items-center gap-2">
-            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-lg overflow-hidden h-8 mr-1 text-xs">
+        <div class="header-actions flex items-center gap-1.5 sm:gap-2">
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-lg overflow-hidden h-8 text-xs">
                 <button onclick="zoomCanvas(0.9)" class="px-2.5 hover:bg-slate-200 font-bold text-slate-500">－</button>
                 <span id="zoom-percent" class="px-2 font-mono text-slate-700 font-bold min-w-[45px] text-center">100%</span>
                 <button onclick="zoomCanvas(1.1)" class="px-2.5 hover:bg-slate-200 font-bold text-slate-500">＋</button>
             </div>
-            <button onclick="fitViewToTables()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition" title="將視野置中到所有枱">
-                🎯 置中檢視
+            <button onclick="fitViewToTables()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition" title="將視野置中到所有枱">
+                🎯<span class="hide-mobile"> 置中</span>
             </button>
-            <button onclick="createNewTableAction()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition">
+            <button onclick="createNewTableAction()" class="hide-mobile bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition">
                 ➕ 新增圓枱
             </button>
-            <a href="admin.html" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition">
-                📋 返回表格
+            <a href="admin.html" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition">
+                📋<span class="hide-mobile"> 返回</span>
             </a>
         </div>
     </header>
