@@ -5,8 +5,8 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-const tbody = document.getElementById('excel-tbody');
-const scrollContainer = document.getElementById('table-scroll-container');
+let tbody = null;
+let scrollContainer = null;
 let localGuestsList = []; 
 
 // 全局維護的分類標籤清單
@@ -27,20 +27,10 @@ function toggleSidePanel() {
     }
 }
 
-// 初始化 SortableJS
-if (typeof Sortable !== 'undefined' && tbody) {
-    sortableInstance = Sortable.create(tbody, {
-        handle: '.drag-handle',
-        animation: 150,
-        ghostClass: 'sortable-ghost',
-        onEnd: function () {
-            recalculateSortNumbersFromDOM();
-        }
-    });
-}
-
-// 🎯 修正核心：還原成你原本最穩陣嘅 Promise.all 雙節點載入邏輯
+// 🎯 穩陣載入：利用 Promise.all 同步獲取已分配與未分配節點
 function loadFirebaseData() {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-gray-400 font-bold">⏳ 正在從 Firebase 載入名單數據...</td></tr>`;
+    
     Promise.all([
         database.ref('wedding_guests').once('value'),
         database.ref('unassigned_guests').once('value')
@@ -57,12 +47,12 @@ function loadFirebaseData() {
     });
 }
 
-// 🎯 解析雙節點數據並匯入 local 陣列
+// 解析 Firebase 數據並合併
 function processAndRenderExcel(weddingGuests, unassignedGuests) {
     localGuestsList = [];
     tbody.innerHTML = '';
 
-    // 1. 處理已分配桌次嘅賓客
+    // 1. 已分配桌次
     Object.keys(weddingGuests).forEach(tableNum => {
         const list = weddingGuests[tableNum];
         if (Array.isArray(list)) {
@@ -80,7 +70,7 @@ function processAndRenderExcel(weddingGuests, unassignedGuests) {
         }
     });
 
-    // 2. 處理未分配 (unassigned_guests) 嘅賓客
+    // 2. 未分配桌次 (unassigned)
     if (Array.isArray(unassignedGuests)) {
         unassignedGuests.forEach(guest => {
             if (guest && guest.name) {
@@ -88,7 +78,7 @@ function processAndRenderExcel(weddingGuests, unassignedGuests) {
                     name: guest.name,
                     side: guest.side || '男方',
                     group: guest.group || '未分類',
-                    table: '', // 後台顯示空白
+                    table: '', 
                     sort: 99
                 });
             }
@@ -103,7 +93,7 @@ function processAndRenderExcel(weddingGuests, unassignedGuests) {
     renderDOMRows();
 }
 
-// 🎯 依據指定 8 個 Column 順序繪製畫面
+// 精準繪製 8 大 Column DOM
 function renderDOMRows() {
     tbody.innerHTML = '';
     
@@ -137,7 +127,7 @@ function renderDOMRows() {
                    class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white">
         `;
 
-        // 欄位順序：拖拉 -> 排序 -> 分配桌次 -> 桌次座位 -> 賓客姓名 -> 來源分類 -> 標籤 -> 操作
+        // 順序：拖拉 -> 排序 -> 分配桌次 -> 桌次座位 -> 賓客姓名 -> 來源分類 -> 標籤 -> 操作
         tr.innerHTML = `
             <td class="py-2 px-3 text-center drag-handle text-gray-400 text-base select-none w-12 cursor-row-resize">☰</td>
             <td class="py-2 px-3 text-center font-mono text-gray-400 font-bold row-sort-num w-12">${index + 1}</td>
@@ -173,7 +163,7 @@ function addNewGuestRow() {
         </select>
     `;
 
-    let groupOptions = currentCategories.map(cat => `<option value="${cat}">${cat}</option>join('');
+    let groupOptions = currentCategories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
     const groupSelectHTML = `
         <select onchange="handleGroupChange(this)" class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white">
             ${groupOptions}
@@ -207,7 +197,7 @@ function addNewGuestRow() {
     scrollContainer.scrollTop = scrollContainer.scrollHeight; 
 }
 
-// 新增自訂分類彈窗
+// 自訂群組彈窗控制
 function handleGroupChange(selectEl) {
     if (selectEl.value === '__NEW__') {
         activeSelectElement = selectEl;
@@ -256,7 +246,7 @@ function recalculateSortNumbersFromDOM() {
     });
 }
 
-// 🎯 按鈕功能：儲存變更，精準分拆數據並儲存回 wedding_guests 同 unassigned_guests 內
+// 儲存至 Firebase 雙節點
 function saveAllToFirebase() {
     const rows = tbody.querySelectorAll('tr');
     let newWeddingGuests = {};   
@@ -268,7 +258,6 @@ function saveAllToFirebase() {
 
         if (inputs.length < 2 || selects.length < 2) return;
 
-        // inputs[0] 是分配桌次，inputs[1] 是賓客姓名
         const gTableRaw = inputs[0].value.trim(); 
         const gName = inputs[1].value.trim();
         const gSide = selects[0].value;
@@ -276,7 +265,6 @@ function saveAllToFirebase() {
 
         if (!gName) return; 
 
-        // 枱號空白 ➔ 塞入 unassigned_guests 陣列
         if (gTableRaw === "" || isNaN(gTableRaw)) {
             newUnassignedGuests.push({
                 name: gName,
@@ -285,7 +273,6 @@ function saveAllToFirebase() {
                 sort: 99
             });
         } else {
-            // 有桌號 ➔ 塞入 wedding_guests 節點
             const targetTable = parseInt(gTableRaw);
             if (!newWeddingGuests[targetTable]) {
                 newWeddingGuests[targetTable] = [];
@@ -300,19 +287,18 @@ function saveAllToFirebase() {
         }
     });
 
-    // 一口氣將整理好嘅雙節點數據 Set 回 Firebase，完美同步前台畫布
     Promise.all([
         database.ref('wedding_guests').set(newWeddingGuests),
         database.ref('unassigned_guests').set(newUnassignedGuests)
     ]).then(() => {
-        alert("✨ 【數據同步成功】！\n已完美同步至排位畫布（已分拆已分配與未分配賓客）。");
-        loadFirebaseData(); // 重新讀取整理畫面
+        alert("✨ 【數據同步成功】！\n數據已完美同步至排位畫布。");
+        loadFirebaseData();
     }).catch(err => {
         alert("❌ 儲存失敗: " + err.message);
     });
 }
 
-// 匯出 CSV 備份
+// CSV 匯出
 function exportToCSV() {
     if (localGuestsList.length === 0) { alert("目前沒有數據可導出！"); return; }
     let csvContent = "\uFEFF姓名,來源(男方/女方),群組,分配桌次\n";
@@ -341,7 +327,7 @@ function exportToCSV() {
     document.body.removeChild(link);
 }
 
-// 匯入 CSV
+// CSV 匯入
 function importCSVAction() {
     const fileInput = document.getElementById('csv-file-input');
     const file = fileInput.files[0];
@@ -377,16 +363,34 @@ function importCSVAction() {
 
         localGuestsList = importedGuests;
         renderDOMRows();
-        toggleSidePanel(); // 自動收回側邊欄
+        toggleSidePanel();
         alert(`成功解析 ${importedGuests.length} 位賓客！確認無誤後請點擊「儲存變更」。`);
     };
     reader.readAsText(file, 'UTF-8');
 }
 
-// 初始化執行載入
-loadFirebaseData();
+// 🎯 當 DOM 完全準備就緒後，再綁定與初始化數據，保證萬無一失
+document.addEventListener('DOMContentLoaded', () => {
+    tbody = document.getElementById('excel-tbody');
+    scrollContainer = document.getElementById('table-scroll-container');
 
-// 手機與安全鎖
+    // 重新正確綁定 SortableJS 到 tbody
+    if (typeof Sortable !== 'undefined' && tbody) {
+        sortableInstance = Sortable.create(tbody, {
+            handle: '.drag-handle',
+            animation: 150,
+            ghostClass: 'sortable-ghost',
+            onEnd: function () {
+                recalculateSortNumbersFromDOM();
+            }
+        });
+    }
+
+    // 啟動載入
+    loadFirebaseData();
+});
+
+// 📱 手機多指防錯位安全鎖 (已完全移除右鍵及開發者工具干擾阻擋)
 (function() {
     let adminLastTouchEnd = 0;
     document.addEventListener('touchstart', function (event) {
@@ -401,15 +405,3 @@ loadFirebaseData();
         adminLastTouchEnd = now;
     }, false);
 })();
-
-document.addEventListener('contextmenu', event => event.preventDefault());
-
-document.addEventListener('keydown', event => {
-    if (
-        event.key === 'F12' ||
-        (event.ctrlKey && event.shiftKey && (event.key === 'I' || event.key === 'C')) ||
-        (event.ctrlKey && event.key === 'u')
-    ) {
-        event.preventDefault();
-    }
-});
