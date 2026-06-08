@@ -178,9 +178,10 @@ function setPrimaryGroupTag(guest, newPrimary) {
 // ==========================================
 const CANVAS_W = 5000;
 const CANVAS_H = 4000;
-const TABLE_DIM = 380;
+const TABLE_DIM = 300;
+const TABLE_LABEL_H = 24;
 const TABLE_CENTER = TABLE_DIM / 2;
-const SEAT_RADIUS = 138;
+const SEAT_RADIUS = 66;
 const GRID_SIZE = 20;
 
 let zoom = 1.0;
@@ -240,7 +241,7 @@ viewport.addEventListener('wheel', (e) => {
 
 viewport.addEventListener('mousedown', (e) => {
     const isSeat = e.target.closest('.seat-slot');
-    const isTableCore = e.target.closest('.table-core');
+    const isTableCore = e.target.closest('.table-core-disc, .table-label');
     const isInteractive = e.target.closest('button, input, select');
 
     if (isSeat || isTableCore || isInteractive) {
@@ -288,7 +289,7 @@ function getTablesBoundingBox() {
         minX = Math.min(minX, s.x);
         minY = Math.min(minY, s.y);
         maxX = Math.max(maxX, s.x + TABLE_DIM);
-        maxY = Math.max(maxY, s.y + TABLE_DIM);
+        maxY = Math.max(maxY, s.y + TABLE_DIM + TABLE_LABEL_H);
     });
     return { minX, minY, maxX, maxY, centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2 };
 }
@@ -359,18 +360,26 @@ function getOccupancyColor(filled, maxSeats) {
 }
 
 function buildOccRingSVG(filled, maxSeats) {
-    const r = 54;
+    const r = 62;
     const circumference = 2 * Math.PI * r;
     const ratio = Math.min(filled / maxSeats, 1);
     const dash = circumference * ratio;
     const color = getOccupancyColor(filled, maxSeats);
-    const size = 120;
+    const size = 148;
+    const cx = size / 2;
     return `<svg class="occ-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="width:calc(${size}px * var(--zoom));height:calc(${size}px * var(--zoom))">
-        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#e2e8f0" stroke-width="6"/>
-        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="6"
+        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="8"/>
+        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="8"
             stroke-dasharray="${dash} ${circumference}" stroke-linecap="round"
-            transform="rotate(-90 ${size/2} ${size/2})"/>
+            transform="rotate(-90 ${cx} ${cx})"/>
     </svg>`;
+}
+
+function shortenGuestName(name, maxLen = 4) {
+    if (!name) return '';
+    const trimmed = name.trim();
+    if (trimmed.length <= maxLen) return trimmed;
+    return trimmed.slice(0, maxLen);
 }
 
 // 側邊欄開合
@@ -406,14 +415,16 @@ database.ref().on('value', (snapshot) => {
         if (!tableSettings[i]) {
             const row = Math.floor((i - 1) / 4);
             const col = (i - 1) % 4;
-            const gridW = 3 * 400 + TABLE_DIM;
-            const gridH = 3 * 400 + TABLE_DIM;
+            const colGap = 320;
+            const rowGap = 340;
+            const gridW = 3 * colGap + TABLE_DIM;
+            const gridH = 3 * rowGap + TABLE_DIM + 24;
             const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
             const startY = snapToGrid(CANVAS_H / 2 - gridH / 2);
             tableSettings[i] = {
                 max_seats: 12,
-                x: snapToGrid(startX + col * 400),
-                y: snapToGrid(startY + row * 400)
+                x: snapToGrid(startX + col * colGap),
+                y: snapToGrid(startY + row * rowGap)
             };
             updatedSettings = true;
         }
@@ -577,29 +588,16 @@ function renderCanvasTables() {
 
         const tableLabel = document.createElement('div');
         tableLabel.className = 'table-label';
-        tableLabel.innerText = `第 ${tableNum} 桌`;
+        tableLabel.innerHTML = `<span>第${tableNum}桌</span><button type="button" class="table-label-settings" title="枱設定">⚙</button>`;
         tableWrapper.appendChild(tableLabel);
 
-        const tableBody = document.createElement('div');
-        tableBody.className = 'table-body';
-
-        tableBody.insertAdjacentHTML('beforeend', buildOccRingSVG(filled, maxSeats));
-
-        const tableCore = document.createElement('div');
-        tableCore.className = 'table-core';
-        tableCore.innerHTML = `
-            <div class="table-core-num">${filled}</div>
-            <div class="table-core-count">${filled} / ${maxSeats}</div>
-            <button type="button" class="table-core-settings">⚙️ 設定</button>
-        `;
-
-        tableCore.querySelector('button').onclick = (e) => {
+        tableLabel.querySelector('button').onclick = (e) => {
             e.stopPropagation();
             openSettingsModal(tableNum, maxSeats);
         };
 
-        tableCore.onmousedown = (e) => {
-            if (e.target.tagName === 'BUTTON') return;
+        const startTableDrag = (e) => {
+            if (e.target.closest('button')) return;
             e.stopPropagation();
             isDraggingTable = true;
             draggedTableElement = tableWrapper;
@@ -608,6 +606,17 @@ function renderCanvasTables() {
             tableOffsetY = pos.y - parseFloat(tableWrapper.dataset.baseY);
             tableWrapper.classList.add('is-dragging');
         };
+        tableLabel.onmousedown = startTableDrag;
+
+        const tableBody = document.createElement('div');
+        tableBody.className = 'table-body';
+
+        tableBody.insertAdjacentHTML('beforeend', buildOccRingSVG(filled, maxSeats));
+
+        const tableCore = document.createElement('div');
+        tableCore.className = 'table-core-disc';
+        tableCore.innerHTML = `<span class="table-core-num">${filled}</span>`;
+        tableCore.onmousedown = startTableDrag;
 
         for (let i = 0; i < maxSeats; i++) {
             const seatSlot = document.createElement('div');
@@ -623,7 +632,8 @@ function renderCanvasTables() {
             if (guest) {
                 const sideClass = guest.side === '女方' ? 'side-female' : 'side-male';
                 seatSlot.className = `seat-slot guest-seat-circle ${sideClass}`;
-                seatSlot.innerHTML = `<span class="text-ellipsis" title="${guest.name}">${guest.name}</span>`;
+                const displayName = shortenGuestName(guest.name);
+                seatSlot.innerHTML = `<span class="text-ellipsis" title="${guest.name}">${displayName}</span>`;
                 seatSlot.setAttribute('draggable', 'true');
 
                 bindGuestTap(seatSlot, () => {
@@ -636,7 +646,7 @@ function renderCanvasTables() {
                 });
             } else {
                 seatSlot.className = "seat-slot seat-empty";
-                seatSlot.innerText = i + 1;
+                seatSlot.innerHTML = '<span style="opacity:0.4">+</span>';
             }
 
             seatSlot.setAttribute('ondragover', 'allowDrop(event)');
