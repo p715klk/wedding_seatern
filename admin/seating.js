@@ -466,6 +466,21 @@ let isDraggingTable = false;
 let draggedTableElement = null;
 let tableOffsetX = 0;
 let tableOffsetY = 0;
+let isGuestDragging = false;
+
+function cancelTableDrag() {
+    if (!draggedTableElement) return;
+    const el = draggedTableElement;
+    const startX = parseFloat(el.dataset.dragStartX ?? el.dataset.baseX ?? 0);
+    const startY = parseFloat(el.dataset.dragStartY ?? el.dataset.baseY ?? 0);
+    el.dataset.baseX = startX;
+    el.dataset.baseY = startY;
+    el.style.left = `${startX * zoom}px`;
+    el.style.top = `${startY * zoom}px`;
+    el.classList.remove('is-dragging');
+    isDraggingTable = false;
+    draggedTableElement = null;
+}
 
 // Firebase 實時同步
 database.ref().on('value', (snapshot) => {
@@ -652,9 +667,13 @@ function renderCanvasTables() {
         tableWrapper.setAttribute('data-table', tableNum);
 
         const startTableDrag = (e) => {
+            if (e.button !== 0 || isGuestDragging) return;
+            if (e.target.closest('.seat-slot, .hub-center, .hub-ring')) return;
             e.stopPropagation();
             isDraggingTable = true;
             draggedTableElement = tableWrapper;
+            tableWrapper.dataset.dragStartX = tableWrapper.dataset.baseX;
+            tableWrapper.dataset.dragStartY = tableWrapper.dataset.baseY;
             const pos = screenToCanvas(e.clientX, e.clientY);
             tableOffsetX = pos.x - parseFloat(tableWrapper.dataset.baseX);
             tableOffsetY = pos.y - parseFloat(tableWrapper.dataset.baseY);
@@ -666,6 +685,7 @@ function renderCanvasTables() {
         tablePlate.onmousedown = startTableDrag;
         tablePlate.ondblclick = (e) => {
             e.stopPropagation();
+            cancelTableDrag();
             openSettingsModal(tableNum, maxSeats);
         };
 
@@ -693,9 +713,18 @@ function renderCanvasTables() {
                     openGuestModal(guest, tableNum, i);
                 });
 
+                seatSlot.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                });
                 seatSlot.addEventListener('dragstart', (e) => {
                     e.stopPropagation();
+                    cancelTableDrag();
+                    isGuestDragging = true;
                     e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: tableNum, seatIndex: i, name: guest.name }));
+                });
+                seatSlot.addEventListener('dragend', () => {
+                    isGuestDragging = false;
+                    cancelTableDrag();
                 });
             } else {
                 seatSlot.className = 'seat-slot seat-empty';
@@ -739,13 +768,22 @@ document.addEventListener('mousemove', (e) => {
 });
 
 document.addEventListener('mouseup', () => {
+    if (isGuestDragging) return;
     if (isDraggingTable && draggedTableElement) {
-        const tableNum = draggedTableElement.getAttribute('data-table');
         const bx = parseInt(draggedTableElement.dataset.baseX, 10);
         const by = parseInt(draggedTableElement.dataset.baseY, 10);
-        tableSettings[tableNum].x = bx;
-        tableSettings[tableNum].y = by;
-        database.ref(`table_settings/${tableNum}`).update({ x: bx, y: by });
+        const startX = parseInt(draggedTableElement.dataset.dragStartX, 10);
+        const startY = parseInt(draggedTableElement.dataset.dragStartY, 10);
+        const moved = Math.abs(bx - startX) > 2 || Math.abs(by - startY) > 2;
+        if (moved) {
+            const tableNum = draggedTableElement.getAttribute('data-table');
+            tableSettings[tableNum].x = bx;
+            tableSettings[tableNum].y = by;
+            database.ref(`table_settings/${tableNum}`).update({ x: bx, y: by });
+        } else {
+            cancelTableDrag();
+            return;
+        }
         draggedTableElement.classList.remove('is-dragging');
     }
     isDraggingTable = false;
@@ -948,18 +986,34 @@ function createNewTableAction() {
     });
 }
 
-function openSettingsModal(tableNum, currentMax) {
-    activeSettingTableNum = tableNum;
+function fillTableSettingsForm(tableNum, currentMax) {
     const settings = tableSettings[tableNum] || {};
+    const numEl = document.getElementById('modal-table-num');
+    const labelEl = document.getElementById('modal-table-label');
+    const maxEl = document.getElementById('modal-max-seats');
+    const numStr = String(tableNum);
+
+    numEl.value = '';
+    numEl.defaultValue = numStr;
+    numEl.setAttribute('value', numStr);
+    numEl.value = numStr;
+
+    labelEl.value = settings.label || '';
+    maxEl.value = String(currentMax);
+}
+
+function openSettingsModal(tableNum, currentMax) {
+    activeSettingTableNum = String(tableNum);
     document.getElementById('modal-table-title').innerText = `⚙️ Table ${tableNum} 設定`;
-    document.getElementById('modal-table-num').value = tableNum;
-    document.getElementById('modal-table-label').value = settings.label || '';
-    document.getElementById('modal-max-seats').value = currentMax;
+    fillTableSettingsForm(tableNum, currentMax);
     showModal(document.getElementById('table-settings-modal'));
 }
 
 function closeSettingsModal() {
     hideModal(document.getElementById('table-settings-modal'));
+    document.getElementById('modal-table-num').value = '';
+    document.getElementById('modal-table-label').value = '';
+    document.getElementById('modal-max-seats').value = '';
     activeSettingTableNum = null;
 }
 
