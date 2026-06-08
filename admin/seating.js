@@ -610,6 +610,15 @@ function closeSidebar() {
     isSidebarOpen = false;
 }
 
+function closeSidebarIfDragLeavesSidebar(clientX) {
+    if (!isSidebarOpen || !isMobileViewport()) return;
+    const content = document.getElementById('sidebar-content');
+    if (!content) return;
+    if (clientX > content.getBoundingClientRect().right) {
+        closeSidebar();
+    }
+}
+
 function initMobileExperience() {
     if (!isMobileViewport()) return;
     closeSidebar();
@@ -723,9 +732,23 @@ function resolvePointerDrop(clientX, clientY, data) {
     }
 }
 
-function setupTouchDrag(el, getDragData, onDragStart) {
+function setupTouchDrag(el, getDragData, options) {
+    const opts = typeof options === 'function' ? { onDragStart: options } : (options || {});
     let startX = 0, startY = 0, dragging = false, ghost = null, dragData = null;
+    let docTouchMove = null;
     const threshold = 14;
+
+    const handleDragMove = (clientX, clientY) => {
+        if (opts.closeSidebarOnLeave) closeSidebarIfDragLeavesSidebar(clientX);
+        if (opts.onDragMove) opts.onDragMove(clientX, clientY, dragData);
+    };
+
+    const cleanupDocTouch = () => {
+        if (docTouchMove) {
+            document.removeEventListener('touchmove', docTouchMove);
+            docTouchMove = null;
+        }
+    };
 
     el.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 1) return;
@@ -746,16 +769,25 @@ function setupTouchDrag(el, getDragData, onDragStart) {
             isGuestDragging = true;
             dragData = getDragData();
             ghost = createDragGhost(dragData.name || '', t.clientX, t.clientY);
-            if (onDragStart) onDragStart(dragData);
+            if (opts.onDragStart) opts.onDragStart(dragData);
+            if (opts.closeSidebarOnLeave) {
+                docTouchMove = (ev) => {
+                    if (!dragging || ev.touches.length !== 1) return;
+                    handleDragMove(ev.touches[0].clientX, ev.touches[0].clientY);
+                };
+                document.addEventListener('touchmove', docTouchMove, { passive: true });
+            }
         }
         if (dragging) {
             e.preventDefault();
             ghost.style.left = `${t.clientX}px`;
             ghost.style.top = `${t.clientY}px`;
+            handleDragMove(t.clientX, t.clientY);
         }
     }, { passive: false });
 
     const endDrag = (e) => {
+        cleanupDocTouch();
         if (dragging && dragData) {
             const t = e.changedTouches[0];
             if (ghost) ghost.style.visibility = 'hidden';
@@ -923,17 +955,17 @@ function renderGroupData(groups, container) {
                     fromTable: 'POOL',
                     index: item.originalIndex,
                     name: item.data.name
-                }), () => {
-                    if (isMobileViewport()) closeSidebar();
-                });
+                }), { closeSidebarOnLeave: true });
             } else {
                 chip.setAttribute('draggable', 'true');
                 chip.addEventListener('dragstart', (e) => {
                     e.stopPropagation();
                     cancelTableDrag();
                     isGuestDragging = true;
-                    if (isMobileViewport()) closeSidebar();
                     e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: "POOL", index: item.originalIndex, name: item.data.name }));
+                });
+                chip.addEventListener('drag', (e) => {
+                    closeSidebarIfDragLeavesSidebar(e.clientX);
                 });
                 chip.addEventListener('dragend', () => {
                     isGuestDragging = false;
