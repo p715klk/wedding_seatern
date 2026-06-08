@@ -10,6 +10,13 @@ let tableSettings = {};
 let activeSettingTableNum = null;
 let selectedGuestContext = null;
 
+const PRIMARY_TAG_KEY = 'group';
+let categoriesByColumn = {
+    'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學']
+};
+let activeSelectElement = null;
+let activeColumnKey = null;
+
 function normalizeGuestTags(val) {
     if (!val) return [];
     if (Array.isArray(val)) return val.map(t => String(t).trim()).filter(t => t && t !== '未分類');
@@ -22,6 +29,114 @@ function normalizeGuestTags(val) {
 function getPrimaryGroup(guest) {
     const tags = normalizeGuestTags(guest.group);
     return tags[0] || '未分類';
+}
+
+function applyMetaLabelColumns(meta) {
+    if (meta && meta.keys && meta.names) {
+        const mergedPool = new Set(categoriesByColumn[PRIMARY_TAG_KEY] || []);
+        meta.keys.forEach(k => {
+            (meta.categories?.[k] || []).forEach(c => mergedPool.add(c));
+        });
+        categoriesByColumn = { [PRIMARY_TAG_KEY]: [...mergedPool] };
+    } else if (meta && meta.categories) {
+        categoriesByColumn = meta.categories;
+    }
+}
+
+function buildTagChipHTML(tag, columnKey) {
+    const safe = tag.replace(/"/g, '&quot;');
+    return `<span class="tag-chip inline-flex items-center gap-0.5 bg-red-100 text-red-800 px-1.5 py-0.5 rounded text-[10px] font-bold" data-tag="${safe}">${tag}<button type="button" onclick="removeModalTag(this,'${columnKey}')" class="text-red-500 hover:text-red-700 font-black leading-none">×</button></span>`;
+}
+
+function buildTagAddSelectHTML(columnKey, selectedTags) {
+    const optionsArr = categoriesByColumn[columnKey] || ['未分類'];
+    const available = optionsArr.filter(cat => !selectedTags.includes(cat));
+    let optsHTML = `<option value="">＋</option>`;
+    optsHTML += available.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+    optsHTML += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>`;
+    return `<select onchange="handleModalTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border border-red-200 bg-red-50/20 rounded px-1 py-0.5 text-[10px] font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
+}
+
+function readModalTags() {
+    const container = document.getElementById('edit-guest-tags');
+    if (!container) return [];
+    return [...container.querySelectorAll('.tag-chip')].map(chip => chip.dataset.tag);
+}
+
+function renderModalTags(tags) {
+    const container = document.getElementById('edit-guest-tags');
+    if (!container) return;
+    const normalized = normalizeGuestTags(tags);
+    normalized.forEach(t => {
+        const pool = categoriesByColumn[PRIMARY_TAG_KEY] || [];
+        if (!pool.includes(t)) pool.push(t);
+    });
+    const chips = normalized.map(t => buildTagChipHTML(t, PRIMARY_TAG_KEY)).join('');
+    container.innerHTML = chips + buildTagAddSelectHTML(PRIMARY_TAG_KEY, normalized);
+}
+
+function insertModalTagChip(columnKey, tag) {
+    const container = document.getElementById('edit-guest-tags');
+    const select = container.querySelector(`.row-tag-add-select-${columnKey}`);
+    if (!select) return;
+    const current = readModalTags();
+    if (!current.includes(tag)) {
+        select.insertAdjacentHTML('beforebegin', buildTagChipHTML(tag, columnKey));
+    }
+}
+
+function refreshModalTagAddSelect(columnKey) {
+    const container = document.getElementById('edit-guest-tags');
+    const select = container.querySelector(`.row-tag-add-select-${columnKey}`);
+    if (!select) return;
+    select.outerHTML = buildTagAddSelectHTML(columnKey, readModalTags());
+}
+
+function handleModalTagAdd(selectEl, columnKey) {
+    const val = selectEl.value;
+    if (!val) return;
+    if (val === '__NEW__') {
+        activeSelectElement = selectEl;
+        activeColumnKey = columnKey;
+        document.getElementById('custom-category-input').value = '';
+        document.getElementById('custom-dialog-overlay').classList.remove('hidden');
+        selectEl.value = '';
+        return;
+    }
+    insertModalTagChip(columnKey, val);
+    refreshModalTagAddSelect(columnKey);
+}
+
+function removeModalTag(btn, columnKey) {
+    btn.closest('.tag-chip').remove();
+    refreshModalTagAddSelect(columnKey);
+}
+
+function closeCustomCategoryDialog(isConfirm) {
+    const overlay = document.getElementById('custom-dialog-overlay');
+    const inputEl = document.getElementById('custom-category-input');
+    overlay.classList.add('hidden');
+
+    if (isConfirm && activeColumnKey) {
+        const newCat = inputEl.value.trim();
+        if (newCat && !categoriesByColumn[activeColumnKey].includes(newCat)) {
+            categoriesByColumn[activeColumnKey].push(newCat);
+            persistMetaLabelColumns();
+            refreshModalTagAddSelect(activeColumnKey);
+            insertModalTagChip(activeColumnKey, newCat);
+            refreshModalTagAddSelect(activeColumnKey);
+        }
+    }
+    activeSelectElement = null;
+    activeColumnKey = null;
+}
+
+function persistMetaLabelColumns() {
+    return database.ref('meta_label_columns').update({
+        keys: [PRIMARY_TAG_KEY],
+        names: ['標籤 (可多選)'],
+        categories: categoriesByColumn
+    });
 }
 
 // ==========================================
@@ -94,12 +209,15 @@ function zoomCanvas(factor) {
 let isSidebarOpen = true;
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar-panel');
+    const toggleBtn = document.getElementById('sidebar-toggle-btn');
     const icon = document.getElementById('sidebar-toggle-icon');
     if (isSidebarOpen) {
         sidebar.classList.add('collapsed');
+        toggleBtn.classList.add('collapsed');
         icon.innerText = "▶";
     } else {
         sidebar.classList.remove('collapsed');
+        toggleBtn.classList.remove('collapsed');
         icon.innerText = "◀";
     }
     isSidebarOpen = !isSidebarOpen;
@@ -116,6 +234,7 @@ database.ref().on('value', (snapshot) => {
     allGuests = root.wedding_guests || [];
     unassignedPool = root.unassigned_guests || [];
     tableSettings = root.table_settings || {};
+    applyMetaLabelColumns(root.meta_label_columns);
 
     let updatedSettings = false;
     for(let i = 1; i <= 14; i++) {
@@ -207,12 +326,22 @@ function renderGroupData(groups, container) {
 
         groups[groupName].forEach(item => {
             const chip = document.createElement('div');
-            chip.className = `text-xs p-2 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-grab ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
+            chip.className = `text-xs p-2 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-pointer ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
             chip.innerText = item.data.name;
             chip.setAttribute('draggable', 'true');
-            
+
+            let chipDragged = false;
             chip.addEventListener('dragstart', (e) => {
+                chipDragged = true;
                 e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: "POOL", index: item.originalIndex, name: item.data.name }));
+            });
+            chip.addEventListener('dragend', () => {
+                setTimeout(() => { chipDragged = false; }, 0);
+            });
+            chip.addEventListener('click', (e) => {
+                if (chipDragged) return;
+                e.stopPropagation();
+                openGuestModal(item.data, null, null, item.originalIndex);
             });
 
             chipsContainer.appendChild(chip);
@@ -338,40 +467,59 @@ document.addEventListener('mouseup', () => {
 
 function allowDrop(e) { e.preventDefault(); }
 
-function openGuestModal(guest, tableNum, seatIdx) {
-    selectedGuestContext = { guest, tableNum, seatIdx };
+function openGuestModal(guest, tableNum, seatIdx, poolIndex) {
+    const fromPool = poolIndex != null;
+    selectedGuestContext = { guest, tableNum, seatIdx, poolIndex, fromPool };
     document.getElementById('edit-guest-name').value = guest.name;
-    document.getElementById('edit-guest-group').value = normalizeGuestTags(guest.group).join('|');
+    renderModalTags(guest.group);
     document.getElementById('edit-guest-side').value = guest.side === '女方' ? '女方' : '男方';
-    document.getElementById('md-guest-seat').innerText = `第 ${tableNum} 桌 - 座位 ${seatIdx + 1}`;
+    document.getElementById('md-guest-seat').innerText = fromPool
+        ? '未安排'
+        : `第 ${tableNum} 桌 - 座位 ${seatIdx + 1}`;
+    document.getElementById('btn-remove-from-seat').classList.toggle('hidden', fromPool);
     document.getElementById('guest-detail-modal').classList.remove('hidden');
 }
 
 function closeGuestModal() {
     document.getElementById('guest-detail-modal').classList.add('hidden');
+    document.getElementById('btn-remove-from-seat').classList.remove('hidden');
     selectedGuestContext = null;
 }
 
 function saveGuestChangesAction() {
     if (!selectedGuestContext) return;
-    const { tableNum, seatIdx } = selectedGuestContext;
-    const tableIdx = parseInt(tableNum);
+    const { tableNum, seatIdx, poolIndex, fromPool } = selectedGuestContext;
 
     const newName = document.getElementById('edit-guest-name').value.trim();
-    const newGroup = normalizeGuestTags(document.getElementById('edit-guest-group').value.trim());
+    const newGroup = readModalTags();
     const newSide = document.getElementById('edit-guest-side').value;
 
     if (!newName) { alert("❌ 姓名不能為空！"); return; }
 
+    if (fromPool) {
+        if (unassignedPool[poolIndex]) {
+            unassignedPool[poolIndex].name = newName;
+            unassignedPool[poolIndex].group = newGroup;
+            unassignedPool[poolIndex].side = newSide;
+            Promise.all([
+                database.ref('unassigned_guests').set(unassignedPool),
+                persistMetaLabelColumns()
+            ]).then(() => closeGuestModal());
+        }
+        return;
+    }
+
+    const tableIdx = parseInt(tableNum);
     const foundIdx = allGuests[tableIdx].findIndex(g => g && g.sort === (seatIdx + 1));
     if (foundIdx !== -1) {
         allGuests[tableIdx][foundIdx].name = newName;
         allGuests[tableIdx][foundIdx].group = newGroup;
         allGuests[tableIdx][foundIdx].side = newSide;
 
-        database.ref(`wedding_guests/${tableIdx}`).set(allGuests[tableIdx]).then(() => {
-            closeGuestModal();
-        });
+        Promise.all([
+            database.ref(`wedding_guests/${tableIdx}`).set(allGuests[tableIdx]),
+            persistMetaLabelColumns()
+        ]).then(() => closeGuestModal());
     }
 }
 
