@@ -176,6 +176,12 @@ function setPrimaryGroupTag(guest, newPrimary) {
 // ==========================================
 // 📌 畫布初始化與平移縮放 (已修復空白處拉唔郁問題)
 // ==========================================
+const CANVAS_W = 5000;
+const CANVAS_H = 4000;
+const TABLE_DIM = 440;
+const TABLE_CENTER = TABLE_DIM / 2;
+const SEAT_RADIUS = 158;
+
 let zoom = 0.8; 
 let panX = -900;  
 let panY = -600;
@@ -239,6 +245,59 @@ function zoomCanvas(factor) {
     applyTransform();
 }
 
+function getTablesBoundingBox() {
+    const nums = Object.keys(tableSettings);
+    if (nums.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    nums.forEach(num => {
+        const s = tableSettings[num];
+        minX = Math.min(minX, s.x);
+        minY = Math.min(minY, s.y);
+        maxX = Math.max(maxX, s.x + TABLE_DIM);
+        maxY = Math.max(maxY, s.y + TABLE_DIM);
+    });
+    return { minX, minY, maxX, maxY, centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2 };
+}
+
+function centerAllTablesOnCanvas() {
+    const bounds = getTablesBoundingBox();
+    if (!bounds) return Promise.resolve(false);
+
+    const dx = CANVAS_W / 2 - bounds.centerX;
+    const dy = CANVAS_H / 2 - bounds.centerY;
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return Promise.resolve(false);
+
+    const updates = {};
+    Object.keys(tableSettings).forEach(num => {
+        tableSettings[num].x = Math.round(tableSettings[num].x + dx);
+        tableSettings[num].y = Math.round(tableSettings[num].y + dy);
+        updates[`table_settings/${num}/x`] = tableSettings[num].x;
+        updates[`table_settings/${num}/y`] = tableSettings[num].y;
+    });
+    return database.ref().update(updates).then(() => true);
+}
+
+function fitViewToTables() {
+    const bounds = getTablesBoundingBox();
+    if (!bounds) return;
+
+    const groupW = bounds.maxX - bounds.minX;
+    const groupH = bounds.maxY - bounds.minY;
+    const vpRect = viewport.getBoundingClientRect();
+    const sidebarWidth = isSidebarOpen ? 320 : 0;
+    const vpW = vpRect.width - sidebarWidth;
+    const vpH = vpRect.height;
+    const padding = 100;
+
+    const zoomX = vpW / (groupW + padding * 2);
+    const zoomY = vpH / (groupH + padding * 2);
+    zoom = Math.min(1.1, Math.max(0.3, Math.min(zoomX, zoomY)));
+
+    panX = sidebarWidth + (vpW / 2) - bounds.centerX * zoom;
+    panY = (vpH / 2) - bounds.centerY * zoom;
+    applyTransform();
+}
+
 // 側邊欄開合
 let isSidebarOpen = true;
 function toggleSidebar() {
@@ -272,10 +331,14 @@ database.ref().on('value', (snapshot) => {
         if (!tableSettings[i]) {
             const row = Math.floor((i - 1) / 4);
             const col = (i - 1) % 4;
+            const gridW = 3 * 480 + TABLE_DIM;
+            const gridH = 3 * 480 + TABLE_DIM;
+            const startX = CANVAS_W / 2 - gridW / 2;
+            const startY = CANVAS_H / 2 - gridH / 2;
             tableSettings[i] = {
                 max_seats: 12,
-                x: 1800 + col * 460,
-                y: 1300 + row * 460
+                x: Math.round(startX + col * 480),
+                y: Math.round(startY + row * 480)
             };
             updatedSettings = true;
         }
@@ -285,10 +348,29 @@ database.ref().on('value', (snapshot) => {
         return; 
     }
 
-    renderSidebar();
-    renderCanvasTables();
-    updateGlobalStats();
-    applyTransform();
+    const runRender = () => {
+        renderSidebar();
+        renderCanvasTables();
+        updateGlobalStats();
+        applyTransform();
+    };
+
+    if (!localStorage.getItem('seating_tables_centered_v2')) {
+        centerAllTablesOnCanvas().then((moved) => {
+            localStorage.setItem('seating_tables_centered_v2', '1');
+            if (!moved) {
+                runRender();
+                fitViewToTables();
+            }
+        });
+        return;
+    }
+
+    runRender();
+    if (!localStorage.getItem('seating_view_fitted_v2')) {
+        fitViewToTables();
+        localStorage.setItem('seating_view_fitted_v2', '1');
+    }
 });
 
 function updateGlobalStats() {
@@ -333,14 +415,14 @@ function renderSidebar() {
 
     // 渲染男方段落
     if (maleCount === 0) {
-        maleContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-4 font-medium">🎉 男方已全數安排</div>`;
+        maleContainer.innerHTML = `<div class="text-center text-slate-400 text-sm py-4 font-medium">🎉 男方已全數安排</div>`;
     } else {
         renderGroupData(maleGroups, maleContainer);
     }
 
     // 渲染女方段落 (自動貼在男方下面)
     if (femaleCount === 0) {
-        femaleContainer.innerHTML = `<div class="text-center text-slate-400 text-xs py-4 font-medium">🎉 女方已全數安排</div>`;
+        femaleContainer.innerHTML = `<div class="text-center text-slate-400 text-sm py-4 font-medium">🎉 女方已全數安排</div>`;
     } else {
         renderGroupData(femaleGroups, femaleContainer);
     }
@@ -351,7 +433,7 @@ function renderGroupData(groups, container) {
         const groupWrap = document.createElement('div');
         groupWrap.className = "pool-group-drop bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm w-full transition-colors";
         groupWrap.dataset.groupName = groupName;
-        groupWrap.innerHTML = `<h4 class="text-[11px] font-bold text-slate-400 mb-2.5 border-b border-slate-100 pb-1">🏷️ ${groupName}</h4>`;
+        groupWrap.innerHTML = `<h4 class="pool-group-title text-xs font-bold text-slate-400 mb-2.5 border-b border-slate-100 pb-1">🏷️ ${groupName}</h4>`;
 
         groupWrap.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -375,7 +457,7 @@ function renderGroupData(groups, container) {
 
         groups[groupName].forEach(item => {
             const chip = document.createElement('div');
-            chip.className = `text-xs p-2 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-grab active:cursor-grabbing ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
+            chip.className = `pool-guest-chip text-sm p-2.5 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-grab active:cursor-grabbing ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
             chip.innerText = item.data.name;
             chip.setAttribute('draggable', 'true');
 
@@ -413,20 +495,31 @@ function renderCanvasTables() {
         });
 
         const tableWrapper = document.createElement('div');
-        tableWrapper.className = "draggable-table w-96 h-96 flex items-center justify-center"; 
+        tableWrapper.className = "draggable-table flex items-center justify-center";
+        tableWrapper.style.width = `${TABLE_DIM}px`;
+        tableWrapper.style.height = `${TABLE_DIM}px`;
         tableWrapper.style.left = `${settings.x}px`;
         tableWrapper.style.top = `${settings.y}px`;
         tableWrapper.setAttribute('data-table', tableNum);
 
+        const seatRing = document.createElement('div');
+        seatRing.className = 'seat-ring';
+        const ringSize = SEAT_RADIUS * 2;
+        seatRing.style.left = `${TABLE_CENTER - SEAT_RADIUS}px`;
+        seatRing.style.top = `${TABLE_CENTER - SEAT_RADIUS}px`;
+        seatRing.style.width = `${ringSize}px`;
+        seatRing.style.height = `${ringSize}px`;
+        tableWrapper.appendChild(seatRing);
+
         const innerCircle = document.createElement('div');
-        innerCircle.className = "w-40 h-40 rounded-full bg-white border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.05)] flex flex-col items-center justify-center relative z-10 select-none cursor-grab";
+        innerCircle.className = "w-40 h-40 rounded-full bg-white border-2 border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.06)] flex flex-col items-center justify-center relative z-10 select-none cursor-grab";
         innerCircle.innerHTML = `
-            <div class="text-[10px] uppercase font-bold tracking-widest text-slate-400">TABLE</div>
+            <div class="text-[11px] uppercase font-bold tracking-widest text-slate-400">TABLE</div>
             <div class="text-3xl font-black text-slate-800 my-0.5">${tableNum}</div>
-            <div class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">
+            <div class="text-xs bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full font-bold">
                 ${guestsInTable.filter(g=>g&&g.name).length} / ${maxSeats}人
             </div>
-            <button class="text-[10px] text-indigo-500 hover:text-indigo-700 font-semibold mt-1.5 transition">⚙️設定</button>
+            <button class="text-xs text-indigo-500 hover:text-indigo-700 font-semibold mt-1.5 transition">⚙️設定</button>
         `;
         
         innerCircle.querySelector('button').onclick = (e) => {
@@ -447,9 +540,8 @@ function renderCanvasTables() {
         for (let i = 0; i < maxSeats; i++) {
             const seatSlot = document.createElement('div');
             const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
-            const radius = 135; 
-            const x = 192 + radius * Math.cos(angle); 
-            const y = 192 + radius * Math.sin(angle);
+            const x = TABLE_CENTER + SEAT_RADIUS * Math.cos(angle);
+            const y = TABLE_CENTER + SEAT_RADIUS * Math.sin(angle);
 
             seatSlot.style.left = `${x}px`;
             seatSlot.style.top = `${y}px`;
@@ -457,7 +549,8 @@ function renderCanvasTables() {
             const guest = seatSlotsArray[i];
 
             if (guest) {
-                seatSlot.className = `seat-slot guest-chip-fixed text-white ${guest.side === '女方' ? 'bg-rose-400 shadow-rose-200' : 'bg-blue-400 shadow-blue-200'}`;
+                const sideClass = guest.side === '女方' ? 'side-female' : 'side-male';
+                seatSlot.className = `seat-slot guest-seat-label ${sideClass}`;
                 seatSlot.innerHTML = `<span class="text-ellipsis" title="${guest.name}">${guest.name}</span>`;
                 seatSlot.setAttribute('draggable', 'true');
 
@@ -470,7 +563,7 @@ function renderCanvasTables() {
                     e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: tableNum, seatIndex: i, name: guest.name }));
                 });
             } else {
-                seatSlot.className = "seat-slot w-7 h-7 rounded-full border-2 border-dashed border-slate-200 bg-white text-slate-300 font-mono text-[10px] flex items-center justify-center hover:bg-indigo-50 hover:border-indigo-400 hover:text-indigo-500 hover:scale-110 shadow-sm transition-all";
+                seatSlot.className = "seat-slot seat-empty";
                 seatSlot.innerText = i + 1;
             }
 
