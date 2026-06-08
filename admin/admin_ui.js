@@ -1,4 +1,18 @@
 // ==========================================
+// 📌 依文字長度估算欄寬
+// ==========================================
+function colWidthByText(text, { min = 40, max = 280, pad = 24, charW = 13 } = {}) {
+    const len = [...String(text)].length;
+    return Math.min(max, Math.max(min, len * charW + pad));
+}
+
+function getLabelColumnWidth(colKey, colName) {
+    const options = categoriesByColumn[colKey] || [];
+    const longest = options.reduce((a, b) => (a.length >= b.length ? a : b), colName);
+    return colWidthByText(longest, { min: colWidthByText(colName, { min: 72, max: 200 }), max: 220 });
+}
+
+// ==========================================
 // 📌 手動拉伸調整 Column 寬度邏輯
 // ==========================================
 function initResizableColumns() {
@@ -24,7 +38,8 @@ function initResizableColumns() {
 
         function drag(e) {
             const width = startWidth + (e.pageX - startX);
-            if (width > 50) { 
+            const minW = parseInt(th.dataset.minWidth, 10) || 32;
+            if (width >= minW) { 
                 th.style.width = width + 'px';
             }
         }
@@ -37,25 +52,31 @@ function initResizableColumns() {
     });
 }
 
-// 📌 動態建立表頭
+function thCell(label, width, { className = 'text-xs font-bold text-gray-600', align = 'center' } = {}) {
+    const minW = Math.max(32, width - 8);
+    return `<th class="py-2.5 px-2 text-${align} ${className} border-b border-gray-200" style="width:${width}px" data-min-width="${minW}">${label}</th>`;
+}
+
+// 📌 動態建立表頭（順序：排序 → 拖拉 → 分配桌次 → 桌次座位 → 姓名 → 來源 → 標籤 → 操作）
 function renderThead() {
     const theadTr = document.getElementById('excel-thead-tr');
     if (!theadTr) return;
 
-    let html = `
-        <th class="py-2.5 px-3 text-center text-[11px] font-bold text-gray-500 border-b border-gray-200" style="width: 50px;">排序</th>
-        <th class="py-2.5 px-3 text-center text-[11px] font-bold text-gray-500 border-b border-gray-200" style="width: 50px;">拖拉</th>
-        <th class="py-2.5 px-3 text-xs font-bold text-gray-600 border-b border-gray-200" style="width: 160px;">桌次座位</th>
-        <th class="py-2.5 px-3 text-xs font-bold text-gray-600 border-b border-gray-200" style="width: 150px;">賓客姓名</th>
-        <th class="py-2.5 px-3 text-xs font-bold text-gray-600 border-b border-gray-200" style="width: 100px;">來源分類</th>
-    `;
+    let html = '';
+    html += thCell('排序', colWidthByText('排序', { min: 34, max: 42, pad: 16 }), { className: 'text-[11px] font-bold text-gray-500' });
+    html += thCell('拖拉', colWidthByText('拖拉', { min: 34, max: 42, pad: 16 }), { className: 'text-[11px] font-bold text-gray-500' });
+    html += thCell('分配桌次', colWidthByText('分配桌次', { min: 68, max: 80 }));
+    html += thCell('桌次座位', colWidthByText('第 99 桌 - 第 99 位', { min: 128, max: 150 }), { align: 'left' });
+    html += thCell('賓客姓名', colWidthByText('賓客姓名', { min: 88, max: 120 }), { align: 'left' });
+    html += thCell('來源分類', colWidthByText('來源分類', { min: 72, max: 84 }));
 
-    labelColumnsNames.forEach(name => {
-        html += `<th class="py-2.5 px-3 text-xs font-bold text-red-700 bg-red-50/40 border-b border-gray-200" style="width: 160px;">${name}</th>`;
+    labelColumnsKeys.forEach((key, i) => {
+        const name = labelColumnsNames[i];
+        const w = getLabelColumnWidth(key, name);
+        html += `<th class="py-2.5 px-2 text-left text-xs font-bold text-red-700 bg-red-50/40 border-b border-gray-200" style="width:${w}px" data-min-width="${Math.max(64, w - 12)}">${name}</th>`;
     });
 
-    html += `<th class="py-2.5 px-3 text-center text-xs font-bold text-gray-600 border-b border-gray-200" style="width: 100px;">分配桌次</th>`;
-    html += `<th class="py-2.5 px-3 text-center text-xs font-bold text-gray-600 border-b border-gray-200" style="width: 80px;">操作</th>`;
+    html += thCell('操作', colWidthByText('❌ 刪除', { min: 56, max: 64 }));
     
     theadTr.innerHTML = html;
     initResizableColumns(); 
@@ -130,7 +151,7 @@ function renderDOMRows() {
 
             let optsHTML = optionsArr.map(cat => `<option value="${cat}" ${currentVal === cat ? 'selected' : ''}>${cat}</option>`).join('');
             labelsTdHTML += `
-                <td class="py-2 px-3">
+                <td class="py-2 px-2">
                     <select onchange="handleGroupChange(this, '${key}')" class="w-full border border-red-200 bg-red-50/20 rounded p-1 text-xs font-bold focus:bg-white row-label-select-${key}">
                         ${optsHTML}
                         <option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂選項...</option>
@@ -140,16 +161,16 @@ function renderDOMRows() {
         });
 
         tr.innerHTML = `
-            <td class="py-2 px-3 text-center font-mono text-gray-400 font-bold row-sort-num">${index + 1}</td>
-            <td class="py-2 px-3 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize">☰</td>
-            <td class="py-2 px-3 text-left font-mono font-bold text-gray-600 text-xs row-seat-txt-cell">第 <span class="row-table-display-num">${guest.table || '-'}</span> 桌 - 第 <span class="row-seat-num">${guest.table ? guest.sort : '-'}</span> 位</td>
-            <td class="py-2 px-3">
+            <td class="py-2 px-2 text-center font-mono text-gray-400 font-bold row-sort-num">${index + 1}</td>
+            <td class="py-2 px-2 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize">☰</td>
+            <td class="py-2 px-2">${tableInputHTML}</td>
+            <td class="py-2 px-2 text-left font-mono font-bold text-gray-600 text-xs row-seat-txt-cell">第 <span class="row-table-display-num">${guest.table || '-'}</span> 桌 - 第 <span class="row-seat-num">${guest.table ? guest.sort : '-'}</span> 位</td>
+            <td class="py-2 px-2">
                 <input type="text" value="${guest.name}" class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white row-name-input">
             </td>
-            <td class="py-2 px-3">${sideSelectHTML}</td>
+            <td class="py-2 px-2">${sideSelectHTML}</td>
             ${labelsTdHTML}
-            <td class="py-2 px-3">${tableInputHTML}</td>
-            <td class="py-2 px-3 text-center">
+            <td class="py-2 px-2 text-center">
                 <button onclick="deleteRowAction(this)" class="text-red-500 hover:text-red-700 font-bold text-xs p-1 transition">❌ 刪除</button>
             </td>
         `;
@@ -181,7 +202,7 @@ function addNewGuestRow() {
         const optionsArr = categoriesByColumn[key] || ['未分類'];
         let optsHTML = optionsArr.map(cat => `<option value="${cat}">${cat}</option>`).join('');
         labelsTdHTML += `
-            <td class="py-2 px-3">
+            <td class="py-2 px-2">
                 <select onchange="handleGroupChange(this, '${key}')" class="w-full border border-red-200 bg-red-50/20 rounded p-1 text-xs font-bold focus:bg-white row-label-select-${key}">
                     ${optsHTML}
                     <option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂選項...</option>
@@ -193,16 +214,16 @@ function addNewGuestRow() {
     const nextIndex = tbody.children.length + 1;
 
     tr.innerHTML = `
-        <td class="py-2 px-3 text-center font-mono text-gray-400 font-bold row-sort-num">${nextIndex}</td>
-        <td class="py-2 px-3 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize">☰</td>
-        <td class="py-2 px-3 text-left font-mono font-bold text-gray-600 text-xs row-seat-txt-cell">未安排</td>
-        <td class="py-2 px-3">
+        <td class="py-2 px-2 text-center font-mono text-gray-400 font-bold row-sort-num">${nextIndex}</td>
+        <td class="py-2 px-2 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize">☰</td>
+        <td class="py-2 px-2">${tableInputHTML}</td>
+        <td class="py-2 px-2 text-left font-mono font-bold text-gray-600 text-xs row-seat-txt-cell">未安排</td>
+        <td class="py-2 px-2">
             <input type="text" value="" placeholder="請輸入姓名" class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white row-name-input">
         </td>
-        <td class="py-2 px-3">${sideSelectHTML}</td>
+        <td class="py-2 px-2">${sideSelectHTML}</td>
         ${labelsTdHTML}
-        <td class="py-2 px-3">${tableInputHTML}</td>
-        <td class="py-2 px-3 text-center">
+        <td class="py-2 px-2 text-center">
             <button onclick="deleteRowAction(this)" class="text-red-500 hover:text-red-700 font-bold text-xs p-1 transition">❌ 刪除</button>
         </td>
     `;
