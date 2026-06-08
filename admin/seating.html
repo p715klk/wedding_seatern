@@ -31,7 +31,7 @@
             position: absolute;
             z-index: 10;
             pointer-events: none;
-            width: calc(300px * var(--zoom));
+            width: calc(400px * var(--zoom));
         }
         .draggable-table * { pointer-events: auto; }
         .draggable-table.is-dragging {
@@ -69,9 +69,24 @@
 
         .table-body {
             position: relative;
-            width: calc(300px * var(--zoom));
-            height: calc(300px * var(--zoom));
+            width: calc(400px * var(--zoom));
+            height: calc(400px * var(--zoom));
         }
+        .table-surface {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: calc(380px * var(--zoom));
+            height: calc(380px * var(--zoom));
+            border-radius: 50%;
+            background: #ffffff;
+            border: calc(1.5px * var(--zoom)) solid #e5e7eb;
+            box-shadow: 0 calc(2px * var(--zoom)) calc(12px * var(--zoom)) rgba(0,0,0,0.05);
+            z-index: 1;
+            cursor: grab;
+        }
+        .table-surface:active { cursor: grabbing; }
         .occ-ring {
             position: absolute;
             left: 50%;
@@ -85,8 +100,8 @@
             left: 50%;
             top: 50%;
             transform: translate(-50%, -50%);
-            width: calc(76px * var(--zoom));
-            height: calc(76px * var(--zoom));
+            width: calc(80px * var(--zoom));
+            height: calc(80px * var(--zoom));
             border-radius: 50%;
             background: #fff;
             box-shadow: 0 calc(1px * var(--zoom)) calc(4px * var(--zoom)) rgba(0,0,0,0.06);
@@ -113,8 +128,8 @@
             transition: transform 0.12s ease, box-shadow 0.12s ease;
         }
         .guest-seat-circle {
-            width: calc(42px * var(--zoom));
-            height: calc(42px * var(--zoom));
+            width: calc(var(--guest-size, 44px) * var(--zoom));
+            height: calc(var(--guest-size, 44px) * var(--zoom));
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -144,8 +159,8 @@
         }
         .guest-seat-circle:active { cursor: grabbing; }
         .seat-empty {
-            width: calc(34px * var(--zoom));
-            height: calc(34px * var(--zoom));
+            width: calc(var(--guest-size, 44px) * var(--zoom));
+            height: calc(var(--guest-size, 44px) * var(--zoom));
             border-radius: 50%;
             border: calc(1.5px * var(--zoom)) solid #e2e8f0;
             background: rgba(255,255,255,0.75);

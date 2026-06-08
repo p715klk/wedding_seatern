@@ -178,10 +178,11 @@ function setPrimaryGroupTag(guest, newPrimary) {
 // ==========================================
 const CANVAS_W = 5000;
 const CANVAS_H = 4000;
-const TABLE_DIM = 300;
+const TABLE_DIM = 400;
+const TABLE_SURFACE = 380;
 const TABLE_LABEL_H = 24;
 const TABLE_CENTER = TABLE_DIM / 2;
-const SEAT_RADIUS = 66;
+const TABLE_INNER_R = TABLE_SURFACE / 2;
 const GRID_SIZE = 20;
 
 let zoom = 1.0;
@@ -241,7 +242,7 @@ viewport.addEventListener('wheel', (e) => {
 
 viewport.addEventListener('mousedown', (e) => {
     const isSeat = e.target.closest('.seat-slot');
-    const isTableCore = e.target.closest('.table-core-disc, .table-label');
+    const isTableCore = e.target.closest('.table-core-disc, .table-label, .table-surface');
     const isInteractive = e.target.closest('button, input, select');
 
     if (isSeat || isTableCore || isInteractive) {
@@ -360,19 +361,31 @@ function getOccupancyColor(filled, maxSeats) {
 }
 
 function buildOccRingSVG(filled, maxSeats) {
-    const r = 62;
+    const r = 52;
     const circumference = 2 * Math.PI * r;
     const ratio = Math.min(filled / maxSeats, 1);
     const dash = circumference * ratio;
     const color = getOccupancyColor(filled, maxSeats);
-    const size = 148;
+    const size = 128;
     const cx = size / 2;
     return `<svg class="occ-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="width:calc(${size}px * var(--zoom));height:calc(${size}px * var(--zoom))">
-        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="8"/>
-        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="8"
+        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="7"/>
+        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="7"
             stroke-dasharray="${dash} ${circumference}" stroke-linecap="round"
             transform="rotate(-90 ${cx} ${cx})"/>
     </svg>`;
+}
+
+function getSeatLayout(maxSeats) {
+    const margin = 16;
+    const guestSize = maxSeats > 14 ? 40 : maxSeats > 12 ? 42 : 44;
+    const guestHalf = guestSize / 2;
+    const maxRadius = TABLE_INNER_R - margin - guestHalf;
+    const minRadius = 108;
+    let radius = maxRadius;
+    if (maxSeats > 10) radius -= (maxSeats - 10) * 2;
+    radius = Math.max(minRadius, Math.min(maxRadius, radius));
+    return { radius, guestSize };
 }
 
 function shortenGuestName(name, maxLen = 4) {
@@ -415,8 +428,8 @@ database.ref().on('value', (snapshot) => {
         if (!tableSettings[i]) {
             const row = Math.floor((i - 1) / 4);
             const col = (i - 1) % 4;
-            const colGap = 320;
-            const rowGap = 340;
+            const colGap = 420;
+            const rowGap = 440;
             const gridW = 3 * colGap + TABLE_DIM;
             const gridH = 3 * rowGap + TABLE_DIM + 24;
             const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
@@ -611,6 +624,14 @@ function renderCanvasTables() {
         const tableBody = document.createElement('div');
         tableBody.className = 'table-body';
 
+        const seatLayout = getSeatLayout(maxSeats);
+        tableBody.style.setProperty('--guest-size', `${seatLayout.guestSize}px`);
+
+        const tableSurface = document.createElement('div');
+        tableSurface.className = 'table-surface';
+        tableSurface.onmousedown = startTableDrag;
+        tableBody.appendChild(tableSurface);
+
         tableBody.insertAdjacentHTML('beforeend', buildOccRingSVG(filled, maxSeats));
 
         const tableCore = document.createElement('div');
@@ -621,8 +642,8 @@ function renderCanvasTables() {
         for (let i = 0; i < maxSeats; i++) {
             const seatSlot = document.createElement('div');
             const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
-            const x = TABLE_CENTER + SEAT_RADIUS * Math.cos(angle);
-            const y = TABLE_CENTER + SEAT_RADIUS * Math.sin(angle);
+            const x = TABLE_CENTER + seatLayout.radius * Math.cos(angle);
+            const y = TABLE_CENTER + seatLayout.radius * Math.sin(angle);
 
             seatSlot.style.left = `calc(${x}px * var(--zoom))`;
             seatSlot.style.top = `calc(${y}px * var(--zoom))`;
