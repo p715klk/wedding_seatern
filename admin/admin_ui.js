@@ -34,22 +34,31 @@ function buildTagChipHTML(tag, columnKey) {
 function buildTagAddSelectHTML(columnKey, selectedTags) {
     const optionsArr = categoriesByColumn[columnKey] || ['未分類'];
     const available = optionsArr.filter(cat => !selectedTags.includes(cat));
-    let optsHTML = `<option value="">＋ 加入標籤...</option>`;
+    let optsHTML = `<option value="">＋</option>`;
     optsHTML += available.map(cat => `<option value="${cat}">${cat}</option>`).join('');
-    optsHTML += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂選項...</option>`;
-    return `<select onchange="handleTagAdd(this, '${columnKey}')" class="row-tag-add-select w-full border border-red-200 bg-red-50/20 rounded p-1 text-xs font-bold focus:bg-white row-tag-add-select-${columnKey}">${optsHTML}</select>`;
+    optsHTML += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>`;
+    return `<select onchange="handleTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border border-red-200 bg-red-50/20 rounded px-1 py-0.5 text-[10px] font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
 }
 
 function buildMultiTagCellHTML(columnKey, tags) {
     const chips = tags.map(t => buildTagChipHTML(t, columnKey)).join('');
     return `
-        <td class="py-2 px-2 align-top">
-            <div class="row-multi-tags" data-column-key="${columnKey}">
-                <div class="tag-chips-container flex flex-wrap gap-1 mb-1 min-h-[22px]">${chips}</div>
+        <td class="py-2 px-2 align-middle">
+            <div class="row-multi-tags flex flex-wrap items-center gap-1" data-column-key="${columnKey}">
+                ${chips}
                 ${buildTagAddSelectHTML(columnKey, tags)}
             </div>
         </td>
     `;
+}
+
+function insertTagChipBeforeSelect(row, columnKey, tag) {
+    const select = row.querySelector(`.row-tag-add-select-${columnKey}`);
+    if (!select) return;
+    const current = readTagsFromRow(row, columnKey);
+    if (!current.includes(tag)) {
+        select.insertAdjacentHTML('beforebegin', buildTagChipHTML(tag, columnKey));
+    }
 }
 
 function refreshTagAddSelect(row, columnKey) {
@@ -77,11 +86,7 @@ function handleTagAdd(selectEl, columnKey) {
         return;
     }
     const row = selectEl.closest('tr');
-    const chipsContainer = row.querySelector('.tag-chips-container');
-    const current = readTagsFromRow(row, columnKey);
-    if (!current.includes(val)) {
-        chipsContainer.insertAdjacentHTML('beforeend', buildTagChipHTML(val, columnKey));
-    }
+    insertTagChipBeforeSelect(row, columnKey, val);
     refreshTagAddSelect(row, columnKey);
 }
 
@@ -278,11 +283,7 @@ function closeCustomCategoryDialog(isConfirm) {
             categoriesByColumn[activeColumnKey].push(newCat);
             refreshAllTagAddSelects(activeColumnKey);
             const row = activeSelectElement.closest('tr');
-            const chipsContainer = row.querySelector('.tag-chips-container');
-            const current = readTagsFromRow(row, activeColumnKey);
-            if (!current.includes(newCat)) {
-                chipsContainer.insertAdjacentHTML('beforeend', buildTagChipHTML(newCat, activeColumnKey));
-            }
+            insertTagChipBeforeSelect(row, activeColumnKey, newCat);
             refreshTagAddSelect(row, activeColumnKey);
         }
     }

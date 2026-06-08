@@ -44,7 +44,11 @@
     padding: 0 1px;
 }
 .row-tag-add-select {
-    font-size: 11px;
+    font-size: 10px;
+    width: auto;
+    max-width: 3.5rem;
+    min-width: 2rem;
+    cursor: pointer;
 }
 
 /* 📌 透過 CSS 限制觸控行為與打字放大 */
