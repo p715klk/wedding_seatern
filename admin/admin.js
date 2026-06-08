@@ -39,40 +39,61 @@ if (typeof Sortable !== 'undefined' && tbody) {
     });
 }
 
-// 🎯 實時監聽 wedding_guests 節點，實現與前台排位畫布完全同步
-database.ref('wedding_guests').on('value', (snapshot) => {
-    const weddingGuests = snapshot.val() || {};
-    
-    // 避免使用者正喺度輸入文字或點選選單時被刷新打斷
-    if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
-        processAndRenderExcel(weddingGuests);
-    }
-});
+// 🎯 修正核心：還原成你原本最穩陣嘅 Promise.all 雙節點載入邏輯
+function loadFirebaseData() {
+    Promise.all([
+        database.ref('wedding_guests').once('value'),
+        database.ref('unassigned_guests').once('value')
+    ]).then(([snapshot1, snapshot2]) => {
+        const weddingGuests = snapshot1.val() || {};
+        const unassignedGuests = snapshot2.val() || [];
 
-// 解析前台畫布數據進後台
-function processAndRenderExcel(weddingGuests) {
+        if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+            processAndRenderExcel(weddingGuests, unassignedGuests);
+        }
+    }).catch(err => {
+        console.error("Firebase 載入失敗:", err);
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-red-500 font-bold">❌ 數據載入失敗: ${err.message}</td></tr>`;
+    });
+}
+
+// 🎯 解析雙節點數據並匯入 local 陣列
+function processAndRenderExcel(weddingGuests, unassignedGuests) {
     localGuestsList = [];
     tbody.innerHTML = '';
 
+    // 1. 處理已分配桌次嘅賓客
     Object.keys(weddingGuests).forEach(tableNum => {
         const list = weddingGuests[tableNum];
         if (Array.isArray(list)) {
             list.forEach(guest => {
                 if (guest && guest.name) {
-                    // 枱號 99 喺前台定義為未安排
-                    const isUnassigned = (tableNum === '99' || parseInt(tableNum) === 99);
-                    
                     localGuestsList.push({
                         name: guest.name,
                         side: guest.side || '男方',
                         group: guest.group || '未分類',
-                        table: isUnassigned ? '' : parseInt(tableNum), 
+                        table: parseInt(tableNum), 
                         sort: guest.sort || 1
                     });
                 }
             });
         }
     });
+
+    // 2. 處理未分配 (unassigned_guests) 嘅賓客
+    if (Array.isArray(unassignedGuests)) {
+        unassignedGuests.forEach(guest => {
+            if (guest && guest.name) {
+                localGuestsList.push({
+                    name: guest.name,
+                    side: guest.side || '男方',
+                    group: guest.group || '未分類',
+                    table: '', // 後台顯示空白
+                    sort: 99
+                });
+            }
+        });
+    }
 
     if (localGuestsList.length === 0) {
         tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-gray-400 font-bold">🎉 目前名單內沒有任何賓客，請點右上角「新增賓客」開始建立。</td></tr>`;
@@ -82,7 +103,7 @@ function processAndRenderExcel(weddingGuests) {
     renderDOMRows();
 }
 
-// 🎯 重新依據指定嘅 8 個全新欄位順序進行繪製
+// 🎯 依據指定 8 個 Column 順序繪製畫面
 function renderDOMRows() {
     tbody.innerHTML = '';
     
@@ -96,7 +117,6 @@ function renderDOMRows() {
         const tr = document.createElement('tr');
         tr.className = "hover:bg-gray-50 transition bg-white";
         
-        // 來源分類 (男方/女方)
         const sideSelectHTML = `
             <select class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white focus:ring-1 focus:ring-red-500 focus:outline-none">
                 <option value="男方" ${guest.side === '男方' ? 'selected' : ''}>♂️ 男方</option>
@@ -104,7 +124,6 @@ function renderDOMRows() {
             </select>
         `;
 
-        // 標籤 (群組自訂分類)
         let groupOptions = currentCategories.map(cat => `<option value="${cat}" ${guest.group === cat ? 'selected' : ''}>${cat}</option>`).join('');
         const groupSelectHTML = `
             <select onchange="handleGroupChange(this)" class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white focus:ring-1 focus:ring-red-500 focus:outline-none">
@@ -113,13 +132,12 @@ function renderDOMRows() {
             </select>
         `;
 
-        // 分配桌次 Input (空白代表未安排)
         const tableInputHTML = `
-            <input type="number" min="1" max="99" placeholder="未安排" value="${guest.table !== undefined && guest.table !== null ? guest.table : ''}" 
+            <input type="number" min="1" max="99" placeholder="未安排" value="${guest.table || ''}" 
                    class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white">
         `;
 
-        // 🌟 欄位順序：拖拉(1) -> 排序(2) -> 分配桌次(3) -> 桌次座位(4) -> 賓客姓名(5) -> 來源分類(6) -> 標籤(7) -> 操作(8)
+        // 欄位順序：拖拉 -> 排序 -> 分配桌次 -> 桌次座位 -> 賓客姓名 -> 來源分類 -> 標籤 -> 操作
         tr.innerHTML = `
             <td class="py-2 px-3 text-center drag-handle text-gray-400 text-base select-none w-12 cursor-row-resize">☰</td>
             <td class="py-2 px-3 text-center font-mono text-gray-400 font-bold row-sort-num w-12">${index + 1}</td>
@@ -155,7 +173,7 @@ function addNewGuestRow() {
         </select>
     `;
 
-    let groupOptions = currentCategories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+    let groupOptions = currentCategories.map(cat => `<option value="${cat}">${cat}</option>join('');
     const groupSelectHTML = `
         <select onchange="handleGroupChange(this)" class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white">
             ${groupOptions}
@@ -170,7 +188,6 @@ function addNewGuestRow() {
 
     const nextIndex = tbody.children.length + 1;
 
-    // 依指定 8 大欄位順序排布
     tr.innerHTML = `
         <td class="py-2 px-3 text-center drag-handle text-gray-400 text-base select-none w-12 cursor-row-resize">☰</td>
         <td class="py-2 px-3 text-center font-mono text-gray-400 font-bold row-sort-num w-12">${nextIndex}</td>
@@ -190,7 +207,7 @@ function addNewGuestRow() {
     scrollContainer.scrollTop = scrollContainer.scrollHeight; 
 }
 
-// 新增自訂分類視窗
+// 新增自訂分類彈窗
 function handleGroupChange(selectEl) {
     if (selectEl.value === '__NEW__') {
         activeSelectElement = selectEl;
@@ -239,10 +256,11 @@ function recalculateSortNumbersFromDOM() {
     });
 }
 
-// 🎯 按鈕功能：儲存變更，完全對準全新 8 個 Column 的 DOM 節點位置進行讀取，精準 Sync 畫布
+// 🎯 按鈕功能：儲存變更，精準分拆數據並儲存回 wedding_guests 同 unassigned_guests 內
 function saveAllToFirebase() {
     const rows = tbody.querySelectorAll('tr');
     let newWeddingGuests = {};   
+    let newUnassignedGuests = [];
 
     rows.forEach((row) => {
         const inputs = row.querySelectorAll('input');
@@ -258,28 +276,37 @@ function saveAllToFirebase() {
 
         if (!gName) return; 
 
-        // 空白為未安排，自動包裝成桌號 99 進前台待分配 Pool
-        let targetTable = 99;
-        if (gTableRaw !== "" && !isNaN(gTableRaw)) {
-            targetTable = parseInt(gTableRaw);
+        // 枱號空白 ➔ 塞入 unassigned_guests 陣列
+        if (gTableRaw === "" || isNaN(gTableRaw)) {
+            newUnassignedGuests.push({
+                name: gName,
+                side: gSide,
+                group: gGroup,
+                sort: 99
+            });
+        } else {
+            // 有桌號 ➔ 塞入 wedding_guests 節點
+            const targetTable = parseInt(gTableRaw);
+            if (!newWeddingGuests[targetTable]) {
+                newWeddingGuests[targetTable] = [];
+            }
+            const currentSeatCount = newWeddingGuests[targetTable].length + 1;
+            newWeddingGuests[targetTable].push({
+                name: gName,
+                side: gSide,
+                group: gGroup,
+                sort: currentSeatCount 
+            });
         }
-
-        if (!newWeddingGuests[targetTable]) {
-            newWeddingGuests[targetTable] = [];
-        }
-        
-        const currentSeatCount = newWeddingGuests[targetTable].length + 1;
-
-        newWeddingGuests[targetTable].push({
-            name: gName,
-            side: gSide,
-            group: gGroup,
-            sort: targetTable === 99 ? 99 : currentSeatCount 
-        });
     });
 
-    database.ref('wedding_guests').set(newWeddingGuests).then(() => {
-        alert("✨ 【數據同步成功】！\n新版 Tailwind 欄位格式之數據已完美同步至排位畫布。");
+    // 一口氣將整理好嘅雙節點數據 Set 回 Firebase，完美同步前台畫布
+    Promise.all([
+        database.ref('wedding_guests').set(newWeddingGuests),
+        database.ref('unassigned_guests').set(newUnassignedGuests)
+    ]).then(() => {
+        alert("✨ 【數據同步成功】！\n已完美同步至排位畫布（已分拆已分配與未分配賓客）。");
+        loadFirebaseData(); // 重新讀取整理畫面
     }).catch(err => {
         alert("❌ 儲存失敗: " + err.message);
     });
@@ -350,13 +377,16 @@ function importCSVAction() {
 
         localGuestsList = importedGuests;
         renderDOMRows();
-        toggleSidePanel(); // 自動收回側邊欄工具箱
+        toggleSidePanel(); // 自動收回側邊欄
         alert(`成功解析 ${importedGuests.length} 位賓客！確認無誤後請點擊「儲存變更」。`);
     };
     reader.readAsText(file, 'UTF-8');
 }
 
-// 手機雙指安全鎖與防右鍵
+// 初始化執行載入
+loadFirebaseData();
+
+// 手機與安全鎖
 (function() {
     let adminLastTouchEnd = 0;
     document.addEventListener('touchstart', function (event) {
