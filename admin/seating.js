@@ -360,24 +360,89 @@ function getOccupancyColor(filled, maxSeats) {
 }
 
 function buildHubRingSVG(filled, maxSeats) {
-    const r = 40;
+    const r = 58;
     const circumference = 2 * Math.PI * r;
     const ratio = Math.min(filled / maxSeats, 1);
     const dash = circumference * ratio;
     const color = getOccupancyColor(filled, maxSeats);
-    const size = 100;
+    const size = 136;
     const cx = size / 2;
     return `<svg class="hub-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="width:calc(${size}px * var(--zoom));height:calc(${size}px * var(--zoom))">
-        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#f3f4f6" stroke-width="5"/>
-        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="5"
+        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#f3f4f6" stroke-width="6"/>
+        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="6"
             stroke-dasharray="${dash} ${circumference}" stroke-linecap="round"
             transform="rotate(-90 ${cx} ${cx})"/>
     </svg>`;
 }
 
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function splitCJKNameEvenly(text) {
+    const len = text.length;
+    if (len <= 3) return escapeHtml(text);
+    if (len === 6) return `${escapeHtml(text.slice(0, 3))}<br>${escapeHtml(text.slice(3))}`;
+    if (len === 8) return `${escapeHtml(text.slice(0, 4))}<br>${escapeHtml(text.slice(4))}`;
+    if (len === 10) return `${escapeHtml(text.slice(0, 5))}<br>${escapeHtml(text.slice(5))}`;
+    if (len % 2 === 0) {
+        const half = len / 2;
+        return `${escapeHtml(text.slice(0, half))}<br>${escapeHtml(text.slice(half))}`;
+    }
+    const half = Math.ceil(len / 2);
+    return `${escapeHtml(text.slice(0, half))}<br>${escapeHtml(text.slice(half))}`;
+}
+
+function formatGuestDisplayName(name) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return '';
+
+    const attachMatch = trimmed.match(/^(.+?)\s*(眷屬\s*\d+.*)$/);
+    let mainPart = trimmed;
+    let attachPart = '';
+    if (attachMatch) {
+        mainPart = attachMatch[1].trim();
+        attachPart = attachMatch[2].replace(/\s+/g, '');
+    }
+
+    const cjkMain = mainPart.replace(/\s/g, '');
+    if (/^[\u4e00-\u9fff]+$/.test(cjkMain)) {
+        let html = splitCJKNameEvenly(cjkMain);
+        if (attachPart) html += `<br>${escapeHtml(attachPart)}`;
+        return html;
+    }
+
+    if (attachPart) return `${escapeHtml(mainPart)}<br>${escapeHtml(attachPart)}`;
+    if (trimmed.includes(' ')) {
+        return trimmed.split(/\s+/).map(escapeHtml).join('<br>');
+    }
+    return escapeHtml(trimmed);
+}
+
+function getTableCategoryLabel(guestsInTable) {
+    const counts = {};
+    guestsInTable.forEach(g => {
+        if (!g || !g.name) return;
+        const tag = getPrimaryGroup(g);
+        if (!tag || tag === '未分類') return;
+        counts[tag] = (counts[tag] || 0) + 1;
+    });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 0) return '';
+    if (sorted.length === 1) return sorted[0][0];
+    const [topTag, topCount] = sorted[0];
+    const [secondTag, secondCount] = sorted[1];
+    if (secondCount >= topCount * 0.35) return `${topTag} / ${secondTag}`;
+    return topTag;
+}
+
 function getSeatLayout(maxSeats) {
     const plateR = PLATE_SIZE / 2;
-    const hubClearR = 52;
+    const hubClearR = 74;
     let guestSize = 64;
     if (maxSeats > 12) guestSize = 58;
     if (maxSeats > 14) guestSize = 54;
@@ -638,7 +703,7 @@ function renderCanvasTables() {
             if (guest) {
                 const sideClass = guest.side === '女方' ? 'side-female' : 'side-male';
                 seatSlot.className = `seat-slot guest-seat-circle ${sideClass}`;
-                seatSlot.innerHTML = `<span class="guest-name-text" title="${guest.name}">${guest.name}</span>`;
+                seatSlot.innerHTML = `<span class="guest-name-text" title="${guest.name}">${formatGuestDisplayName(guest.name)}</span>`;
                 seatSlot.setAttribute('draggable', 'true');
 
                 bindGuestTap(seatSlot, () => {
@@ -662,9 +727,14 @@ function renderCanvasTables() {
 
         tablePlate.insertAdjacentHTML('beforeend', buildHubRingSVG(filled, maxSeats));
 
+        const categoryLabel = getTableCategoryLabel(guestsInTable);
         const hubCenter = document.createElement('div');
         hubCenter.className = 'hub-center';
-        hubCenter.innerHTML = `<span class="hub-title">Table ${tableNum}</span><span class="hub-num">${filled}</span>`;
+        hubCenter.innerHTML = [
+            `<span class="hub-title">Table ${tableNum}</span>`,
+            categoryLabel ? `<span class="hub-category">${escapeHtml(categoryLabel)}</span>` : '',
+            `<span class="hub-num">${filled}</span>`
+        ].join('');
         tablePlate.appendChild(hubCenter);
 
         tableWrapper.appendChild(tablePlate);

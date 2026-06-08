@@ -68,19 +68,34 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: calc(1px * var(--zoom));
+            justify-content: center;
+            gap: calc(2px * var(--zoom));
             line-height: 1.15;
+            max-width: calc(110px * var(--zoom));
         }
         .hub-title {
-            font-size: calc(11px * var(--zoom));
-            font-weight: 600;
-            color: #6b7280;
-            white-space: nowrap;
-        }
-        .hub-num {
-            font-size: calc(17px * var(--zoom));
+            font-size: calc(18px * var(--zoom));
             font-weight: 800;
             color: #1f2937;
+            white-space: nowrap;
+            line-height: 1.1;
+        }
+        .hub-category {
+            font-size: calc(10px * var(--zoom));
+            font-weight: 600;
+            color: #6b7280;
+            line-height: 1.25;
+            word-break: break-word;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            overflow: hidden;
+        }
+        .hub-num {
+            font-size: calc(10px * var(--zoom));
+            font-weight: 500;
+            color: #9ca3af;
+            line-height: 1;
         }
 
         .seat-slot {
@@ -127,14 +142,12 @@
             cursor: default;
         }
         .guest-name-text {
-            display: -webkit-box;
-            -webkit-box-orient: vertical;
-            -webkit-line-clamp: 2;
+            display: block;
             overflow: hidden;
-            word-break: break-word;
             width: 100%;
             max-width: calc((var(--guest-size, 64px) - 10px) * var(--zoom));
-            line-height: 1.2;
+            line-height: 1.15;
+            word-break: keep-all;
         }
 
         /* 電腦版加大字體（側欄 & 彈窗） */
