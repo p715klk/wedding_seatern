@@ -178,11 +178,11 @@ function setPrimaryGroupTag(guest, newPrimary) {
 // ==========================================
 const CANVAS_W = 5000;
 const CANVAS_H = 4000;
-const TABLE_DIM = 400;
-const TABLE_SURFACE = 380;
-const TABLE_LABEL_H = 24;
-const TABLE_CENTER = TABLE_DIM / 2;
-const TABLE_INNER_R = TABLE_SURFACE / 2;
+const PLATE_SIZE = 260;
+const PLATE_CENTER = PLATE_SIZE / 2;
+const TABLE_DIM = PLATE_SIZE;
+const TABLE_LABEL_H = 20;
+const TABLE_TOTAL_H = PLATE_SIZE + TABLE_LABEL_H;
 const GRID_SIZE = 20;
 
 let zoom = 1.0;
@@ -242,7 +242,7 @@ viewport.addEventListener('wheel', (e) => {
 
 viewport.addEventListener('mousedown', (e) => {
     const isSeat = e.target.closest('.seat-slot');
-    const isTableCore = e.target.closest('.table-core-disc, .table-label, .table-surface');
+    const isTableCore = e.target.closest('.table-plate, .table-label');
     const isInteractive = e.target.closest('button, input, select');
 
     if (isSeat || isTableCore || isInteractive) {
@@ -290,7 +290,7 @@ function getTablesBoundingBox() {
         minX = Math.min(minX, s.x);
         minY = Math.min(minY, s.y);
         maxX = Math.max(maxX, s.x + TABLE_DIM);
-        maxY = Math.max(maxY, s.y + TABLE_DIM + TABLE_LABEL_H);
+        maxY = Math.max(maxY, s.y + TABLE_TOTAL_H);
     });
     return { minX, minY, maxX, maxY, centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2 };
 }
@@ -354,41 +354,43 @@ function fitViewToTables() {
 
 function getOccupancyColor(filled, maxSeats) {
     const ratio = filled / maxSeats;
-    if (ratio > 1) return '#ef4444';
-    if (ratio >= 1) return '#f59e0b';
-    if (ratio >= 0.75) return '#eab308';
-    return '#22c55e';
+    if (ratio > 1) return '#f87171';
+    if (ratio >= 1) return '#fb923c';
+    if (ratio >= 0.7) return '#fbbf24';
+    return '#4ade80';
 }
 
-function buildOccRingSVG(filled, maxSeats) {
-    const r = 52;
+function buildHubRingSVG(filled, maxSeats) {
+    const r = 36;
     const circumference = 2 * Math.PI * r;
     const ratio = Math.min(filled / maxSeats, 1);
     const dash = circumference * ratio;
     const color = getOccupancyColor(filled, maxSeats);
-    const size = 128;
+    const size = 92;
     const cx = size / 2;
-    return `<svg class="occ-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="width:calc(${size}px * var(--zoom));height:calc(${size}px * var(--zoom))">
-        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="7"/>
-        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="7"
+    return `<svg class="hub-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="width:calc(${size}px * var(--zoom));height:calc(${size}px * var(--zoom))">
+        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#f3f4f6" stroke-width="5"/>
+        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="5"
             stroke-dasharray="${dash} ${circumference}" stroke-linecap="round"
             transform="rotate(-90 ${cx} ${cx})"/>
     </svg>`;
 }
 
 function getSeatLayout(maxSeats) {
-    const margin = 16;
-    const guestSize = maxSeats > 14 ? 40 : maxSeats > 12 ? 42 : 44;
+    const plateR = PLATE_SIZE / 2;
+    const hubClearR = 44;
+    const guestSize = maxSeats > 14 ? 32 : 36;
     const guestHalf = guestSize / 2;
-    const maxRadius = TABLE_INNER_R - margin - guestHalf;
-    const minRadius = 108;
-    let radius = maxRadius;
-    if (maxSeats > 10) radius -= (maxSeats - 10) * 2;
+    const maxRadius = plateR - 8 - guestHalf;
+    const minRadius = hubClearR + guestHalf;
+    let radius = 86;
+    if (maxSeats > 10) radius = 82;
+    if (maxSeats > 14) radius = 78;
     radius = Math.max(minRadius, Math.min(maxRadius, radius));
     return { radius, guestSize };
 }
 
-function shortenGuestName(name, maxLen = 4) {
+function shortenGuestName(name, maxLen = 3) {
     if (!name) return '';
     const trimmed = name.trim();
     if (trimmed.length <= maxLen) return trimmed;
@@ -428,10 +430,10 @@ database.ref().on('value', (snapshot) => {
         if (!tableSettings[i]) {
             const row = Math.floor((i - 1) / 4);
             const col = (i - 1) % 4;
-            const colGap = 420;
-            const rowGap = 440;
+            const colGap = 280;
+            const rowGap = 300;
             const gridW = 3 * colGap + TABLE_DIM;
-            const gridH = 3 * rowGap + TABLE_DIM + 24;
+            const gridH = 3 * rowGap + TABLE_TOTAL_H;
             const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
             const startY = snapToGrid(CANVAS_H / 2 - gridH / 2);
             tableSettings[i] = {
@@ -601,16 +603,10 @@ function renderCanvasTables() {
 
         const tableLabel = document.createElement('div');
         tableLabel.className = 'table-label';
-        tableLabel.innerHTML = `<span>第${tableNum}桌</span><button type="button" class="table-label-settings" title="枱設定">⚙</button>`;
+        tableLabel.innerText = `第${tableNum}桌`;
         tableWrapper.appendChild(tableLabel);
 
-        tableLabel.querySelector('button').onclick = (e) => {
-            e.stopPropagation();
-            openSettingsModal(tableNum, maxSeats);
-        };
-
         const startTableDrag = (e) => {
-            if (e.target.closest('button')) return;
             e.stopPropagation();
             isDraggingTable = true;
             draggedTableElement = tableWrapper;
@@ -620,30 +616,27 @@ function renderCanvasTables() {
             tableWrapper.classList.add('is-dragging');
         };
         tableLabel.onmousedown = startTableDrag;
+        tableLabel.ondblclick = (e) => {
+            e.stopPropagation();
+            openSettingsModal(tableNum, maxSeats);
+        };
 
-        const tableBody = document.createElement('div');
-        tableBody.className = 'table-body';
+        const tablePlate = document.createElement('div');
+        tablePlate.className = 'table-plate';
+        tablePlate.onmousedown = startTableDrag;
+        tablePlate.ondblclick = (e) => {
+            e.stopPropagation();
+            openSettingsModal(tableNum, maxSeats);
+        };
 
         const seatLayout = getSeatLayout(maxSeats);
-        tableBody.style.setProperty('--guest-size', `${seatLayout.guestSize}px`);
-
-        const tableSurface = document.createElement('div');
-        tableSurface.className = 'table-surface';
-        tableSurface.onmousedown = startTableDrag;
-        tableBody.appendChild(tableSurface);
-
-        tableBody.insertAdjacentHTML('beforeend', buildOccRingSVG(filled, maxSeats));
-
-        const tableCore = document.createElement('div');
-        tableCore.className = 'table-core-disc';
-        tableCore.innerHTML = `<span class="table-core-num">${filled}</span>`;
-        tableCore.onmousedown = startTableDrag;
+        tablePlate.style.setProperty('--guest-size', `${seatLayout.guestSize}px`);
 
         for (let i = 0; i < maxSeats; i++) {
             const seatSlot = document.createElement('div');
             const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
-            const x = TABLE_CENTER + seatLayout.radius * Math.cos(angle);
-            const y = TABLE_CENTER + seatLayout.radius * Math.sin(angle);
+            const x = PLATE_CENTER + seatLayout.radius * Math.cos(angle);
+            const y = PLATE_CENTER + seatLayout.radius * Math.sin(angle);
 
             seatSlot.style.left = `calc(${x}px * var(--zoom))`;
             seatSlot.style.top = `calc(${y}px * var(--zoom))`;
@@ -666,18 +659,24 @@ function renderCanvasTables() {
                     e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: tableNum, seatIndex: i, name: guest.name }));
                 });
             } else {
-                seatSlot.className = "seat-slot seat-empty";
-                seatSlot.innerHTML = '<span style="opacity:0.4">+</span>';
+                seatSlot.className = 'seat-slot seat-empty';
+                seatSlot.innerHTML = '<span>+</span>';
             }
 
             seatSlot.setAttribute('ondragover', 'allowDrop(event)');
             seatSlot.setAttribute('ondrop', `handleDropOnSpecificSeat(event, "${tableNum}", ${i})`);
 
-            tableBody.appendChild(seatSlot);
+            tablePlate.appendChild(seatSlot);
         }
 
-        tableBody.appendChild(tableCore);
-        tableWrapper.appendChild(tableBody);
+        tablePlate.insertAdjacentHTML('beforeend', buildHubRingSVG(filled, maxSeats));
+
+        const hubNum = document.createElement('span');
+        hubNum.className = 'hub-num';
+        hubNum.innerText = filled;
+        tablePlate.appendChild(hubNum);
+
+        tableWrapper.appendChild(tablePlate);
         canvas.appendChild(tableWrapper);
     });
 }
@@ -900,8 +899,8 @@ function createNewTableAction() {
     );
     database.ref(`table_settings/${cleanNum}`).set({
         max_seats: cleanMax,
-        x: snapToGrid(center.x - TABLE_DIM / 2),
-        y: snapToGrid(center.y - TABLE_DIM / 2)
+        x: snapToGrid(center.x - PLATE_SIZE / 2),
+        y: snapToGrid(center.y - TABLE_TOTAL_H / 2)
     });
 }
 
