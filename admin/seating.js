@@ -423,23 +423,6 @@ function formatGuestDisplayName(name) {
     return escapeHtml(trimmed);
 }
 
-function getTableCategoryLabel(guestsInTable) {
-    const counts = {};
-    guestsInTable.forEach(g => {
-        if (!g || !g.name) return;
-        const tag = getPrimaryGroup(g);
-        if (!tag || tag === '未分類') return;
-        counts[tag] = (counts[tag] || 0) + 1;
-    });
-    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    if (sorted.length === 0) return '';
-    if (sorted.length === 1) return sorted[0][0];
-    const [topTag, topCount] = sorted[0];
-    const [secondTag, secondCount] = sorted[1];
-    if (secondCount >= topCount * 0.35) return `${topTag} / ${secondTag}`;
-    return topTag;
-}
-
 function getSeatLayout(maxSeats) {
     const plateR = PLATE_SIZE / 2;
     const hubClearR = 74;
@@ -727,12 +710,12 @@ function renderCanvasTables() {
 
         tablePlate.insertAdjacentHTML('beforeend', buildHubRingSVG(filled, maxSeats));
 
-        const categoryLabel = getTableCategoryLabel(guestsInTable);
+        const tableLabel = (settings.label || '').trim();
         const hubCenter = document.createElement('div');
         hubCenter.className = 'hub-center';
         hubCenter.innerHTML = [
             `<span class="hub-title">Table ${tableNum}</span>`,
-            categoryLabel ? `<span class="hub-category">${escapeHtml(categoryLabel)}</span>` : '',
+            tableLabel ? `<span class="hub-category">${escapeHtml(tableLabel)}</span>` : '',
             `<span class="hub-num">${filled}</span>`
         ].join('');
         tablePlate.appendChild(hubCenter);
@@ -967,7 +950,10 @@ function createNewTableAction() {
 
 function openSettingsModal(tableNum, currentMax) {
     activeSettingTableNum = tableNum;
-    document.getElementById('modal-table-title').innerText = `⚙️ 調整第 ${tableNum} 桌設定`;
+    const settings = tableSettings[tableNum] || {};
+    document.getElementById('modal-table-title').innerText = `⚙️ Table ${tableNum} 設定`;
+    document.getElementById('modal-table-num').value = tableNum;
+    document.getElementById('modal-table-label').value = settings.label || '';
     document.getElementById('modal-max-seats').value = currentMax;
     showModal(document.getElementById('table-settings-modal'));
 }
@@ -979,8 +965,52 @@ function closeSettingsModal() {
 
 function saveTableSettingsAction() {
     if (!activeSettingTableNum) return;
+
+    const oldNum = String(activeSettingTableNum);
+    const newNumRaw = document.getElementById('modal-table-num').value.trim();
+    const newLabel = document.getElementById('modal-table-label').value.trim();
     const newMax = parseInt(document.getElementById('modal-max-seats').value) || 12;
-    database.ref(`table_settings/${activeSettingTableNum}/max_seats`).set(newMax).then(() => { closeSettingsModal(); });
+
+    if (!newNumRaw) { alert('❌ 枱號不能為空！'); return; }
+    const newNum = String(parseInt(newNumRaw, 10));
+    if (!newNum || newNum === 'NaN' || parseInt(newNum, 10) < 1) {
+        alert('❌ 請輸入有效枱號（1–99）！');
+        return;
+    }
+    if (newNum !== oldNum && tableSettings[newNum]) {
+        alert(`❌ Table ${newNum} 已存在！`);
+        return;
+    }
+
+    const oldSettings = tableSettings[oldNum] || {};
+    const newSettings = {
+        ...oldSettings,
+        max_seats: newMax,
+        label: newLabel
+    };
+
+    if (newNum === oldNum) {
+        database.ref(`table_settings/${oldNum}`).update({
+            max_seats: newMax,
+            label: newLabel
+        }).then(() => closeSettingsModal());
+        return;
+    }
+
+    const oldIdx = parseInt(oldNum, 10);
+    const newIdx = parseInt(newNum, 10);
+    const guests = (allGuests[oldIdx] || []).map(g => {
+        if (!g || !g.name) return g;
+        return { ...g, table: newIdx };
+    });
+
+    const updates = {};
+    updates[`table_settings/${newNum}`] = newSettings;
+    updates[`table_settings/${oldNum}`] = null;
+    updates[`wedding_guests/${newIdx}`] = guests;
+    updates[`wedding_guests/${oldIdx}`] = null;
+
+    database.ref().update(updates).then(() => closeSettingsModal());
 }
 
 function deleteTableAction() {
