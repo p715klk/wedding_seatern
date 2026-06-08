@@ -90,7 +90,8 @@ function addNewCustomLabelColumn() {
 
     labelColumnsKeys.push(newKey);
     labelColumnsNames.push(newName);
-    categoriesByColumn[newKey] = ['未分類', '朋友', '同事', '重要長輩'];
+    const firstColKey = labelColumnsKeys[0];
+    categoriesByColumn[newKey] = [...(categoriesByColumn[firstColKey] || ['未分類'])];
 
     renderThead();
     
