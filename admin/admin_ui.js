@@ -1,10 +1,10 @@
 // ==========================================
-// 📌 5. 核心修正 1：手動拉伸調整 Column 寬度邏輯
+// 📌 手動拉伸調整 Column 寬度邏輯
 // ==========================================
 function initResizableColumns() {
     const ths = document.querySelectorAll('#excel-thead-tr th');
     ths.forEach(th => {
-        if (th.querySelector('.resizer')) return; // 防止重複附加
+        if (th.querySelector('.resizer')) return; 
 
         const resizer = document.createElement('div');
         resizer.className = 'resizer';
@@ -58,7 +58,7 @@ function renderThead() {
     html += `<th class="py-2.5 px-3 text-center text-xs font-bold text-gray-600 border-b border-gray-200" style="width: 80px;">操作</th>`;
     
     theadTr.innerHTML = html;
-    initResizableColumns(); // 綁定拉伸事件
+    initResizableColumns(); 
 }
 
 // 橫向擴充全新標籤分類欄
@@ -96,9 +96,7 @@ function addNewCustomLabelColumn() {
     renderDOMRows();
 }
 
-// ==========================================
-// 📌 6. 表格數據渲染 (純文字來源、聯動輸入框)
-// ==========================================
+// 表格數據列渲染
 function renderDOMRows() {
     tbody.innerHTML = '';
     
@@ -250,7 +248,6 @@ function deleteRowAction(btn) {
     recalculateSortNumbersFromDOM();
 }
 
-// 📌 桌次與內部座位號連動重算
 function recalculateSortNumbersFromDOM() {
     const rows = tbody.querySelectorAll('tr');
     let tableCounters = {}; 
@@ -279,7 +276,6 @@ function recalculateSortNumbersFromDOM() {
     });
 }
 
-// Lifecycle 生命週期就緒
 document.addEventListener('DOMContentLoaded', () => {
     tbody = document.getElementById('excel-tbody');
     scrollContainer = document.getElementById('table-scroll-container');
