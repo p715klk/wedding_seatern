@@ -601,20 +601,28 @@ function getSeatLayout(maxSeats) {
 // 側邊欄開合
 let isSidebarOpen = true;
 
+function getSidebarRightEdge() {
+    const content = document.getElementById('sidebar-content');
+    if (content && isSidebarOpen) {
+        return content.getBoundingClientRect().right;
+    }
+    return getSidebarWidth();
+}
+
 function closeSidebar() {
     if (!isSidebarOpen) return;
     const sidebar = document.getElementById('sidebar-panel');
     const icon = document.getElementById('sidebar-toggle-icon');
-    sidebar.classList.add('collapsed');
+    sidebar.classList.add('collapse-instant', 'collapsed');
     icon.innerText = '▶';
     isSidebarOpen = false;
+    requestAnimationFrame(() => sidebar.classList.remove('collapse-instant'));
 }
 
-function closeSidebarIfDragLeavesSidebar(clientX) {
-    if (!isSidebarOpen || !isMobileViewport()) return;
-    const content = document.getElementById('sidebar-content');
-    if (!content) return;
-    if (clientX > content.getBoundingClientRect().right) {
+function closeSidebarIfDragLeavesSidebar(clientX, sidebarRight) {
+    if (!isSidebarOpen) return;
+    const edge = sidebarRight ?? getSidebarRightEdge();
+    if (clientX > edge - 8) {
         closeSidebar();
     }
 }
@@ -734,21 +742,13 @@ function resolvePointerDrop(clientX, clientY, data) {
 
 function setupTouchDrag(el, getDragData, options) {
     const opts = typeof options === 'function' ? { onDragStart: options } : (options || {});
+    if (opts.closeSidebarOnLeave) {
+        setupPoolTouchDrag(el, getDragData, opts);
+        return;
+    }
+
     let startX = 0, startY = 0, dragging = false, ghost = null, dragData = null;
-    let docTouchMove = null;
     const threshold = 14;
-
-    const handleDragMove = (clientX, clientY) => {
-        if (opts.closeSidebarOnLeave) closeSidebarIfDragLeavesSidebar(clientX);
-        if (opts.onDragMove) opts.onDragMove(clientX, clientY, dragData);
-    };
-
-    const cleanupDocTouch = () => {
-        if (docTouchMove) {
-            document.removeEventListener('touchmove', docTouchMove);
-            docTouchMove = null;
-        }
-    };
 
     el.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 1) return;
@@ -770,24 +770,16 @@ function setupTouchDrag(el, getDragData, options) {
             dragData = getDragData();
             ghost = createDragGhost(dragData.name || '', t.clientX, t.clientY);
             if (opts.onDragStart) opts.onDragStart(dragData);
-            if (opts.closeSidebarOnLeave) {
-                docTouchMove = (ev) => {
-                    if (!dragging || ev.touches.length !== 1) return;
-                    handleDragMove(ev.touches[0].clientX, ev.touches[0].clientY);
-                };
-                document.addEventListener('touchmove', docTouchMove, { passive: true });
-            }
         }
         if (dragging) {
             e.preventDefault();
             ghost.style.left = `${t.clientX}px`;
             ghost.style.top = `${t.clientY}px`;
-            handleDragMove(t.clientX, t.clientY);
+            if (opts.onDragMove) opts.onDragMove(t.clientX, t.clientY, dragData);
         }
     }, { passive: false });
 
     const endDrag = (e) => {
-        cleanupDocTouch();
         if (dragging && dragData) {
             const t = e.changedTouches[0];
             if (ghost) ghost.style.visibility = 'hidden';
@@ -803,6 +795,75 @@ function setupTouchDrag(el, getDragData, options) {
 
     el.addEventListener('touchend', endDrag, { passive: true });
     el.addEventListener('touchcancel', endDrag, { passive: true });
+}
+
+function setupPoolTouchDrag(el, getDragData, opts) {
+    const threshold = 14;
+
+    el.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        e.stopPropagation();
+        resetTouchGestures();
+        cancelTableDrag();
+
+        const touchId = e.touches[0].identifier;
+        let startX = e.touches[0].clientX;
+        let startY = e.touches[0].clientY;
+        let dragging = false;
+        let ghost = null;
+        let dragData = null;
+        const sidebarRight = getSidebarRightEdge();
+
+        const findTouch = (list) => {
+            for (let i = 0; i < list.length; i++) {
+                if (list[i].identifier === touchId) return list[i];
+            }
+            return null;
+        };
+
+        const onDocMove = (ev) => {
+            const t = findTouch(ev.touches);
+            if (!t) return;
+
+            closeSidebarIfDragLeavesSidebar(t.clientX, sidebarRight);
+
+            const dist = Math.hypot(t.clientX - startX, t.clientY - startY);
+            if (!dragging && dist > threshold) {
+                dragging = true;
+                isGuestDragging = true;
+                dragData = getDragData();
+                ghost = createDragGhost(dragData.name || '', t.clientX, t.clientY);
+                if (opts.onDragStart) opts.onDragStart(dragData);
+            }
+            if (dragging) {
+                ev.preventDefault();
+                ghost.style.left = `${t.clientX}px`;
+                ghost.style.top = `${t.clientY}px`;
+                if (opts.onDragMove) opts.onDragMove(t.clientX, t.clientY, dragData);
+            }
+        };
+
+        const onDocEnd = (ev) => {
+            const ended = findTouch(ev.changedTouches);
+            if (!ended) return;
+
+            document.removeEventListener('touchmove', onDocMove, true);
+            document.removeEventListener('touchend', onDocEnd, true);
+            document.removeEventListener('touchcancel', onDocEnd, true);
+
+            if (dragging && dragData) {
+                if (ghost) ghost.style.visibility = 'hidden';
+                resolvePointerDrop(ended.clientX, ended.clientY, dragData);
+            }
+            if (ghost) ghost.remove();
+            isGuestDragging = false;
+            cancelTableDrag();
+        };
+
+        document.addEventListener('touchmove', onDocMove, { passive: false, capture: true });
+        document.addEventListener('touchend', onDocEnd, { capture: true });
+        document.addEventListener('touchcancel', onDocEnd, { capture: true });
+    }, { passive: true });
 }
 
 function cancelTableDrag() {

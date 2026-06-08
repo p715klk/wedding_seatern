@@ -194,6 +194,10 @@
             pointer-events: auto;
             transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
         }
+        #sidebar-panel.collapse-instant,
+        #sidebar-panel.collapse-instant #sidebar-content {
+            transition: none !important;
+        }
         #sidebar-panel.collapsed {
             transform: translateX(-100%);
         }
