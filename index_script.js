@@ -17,6 +17,33 @@ const layout = [
 let dbData = {};     
 let statusState = {};
 
+function normalizeGuestTags(val) {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.map(t => String(t).trim()).filter(t => t && t !== '未分類');
+    const s = String(val).trim();
+    if (!s || s === '未分類') return [];
+    if (s.includes('|')) return s.split('|').map(t => t.trim()).filter(t => t && t !== '未分類');
+    return [s];
+}
+
+function formatGuestTags(guest) {
+    const tags = normalizeGuestTags(guest.group);
+    return tags.length ? tags.join(' · ') : '未分類';
+}
+
+function guestTagSpans(guest) {
+    const tags = normalizeGuestTags(guest.group);
+    if (!tags.length) return `<span class="px-2 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-700">未分類</span>`;
+    return tags.map(t => `<span class="px-2 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-700">${t}</span>`).join('');
+}
+
+function guestMatchesKeyword(guest, keyword) {
+    const name = (guest.name || '').toLowerCase();
+    const side = (guest.side || '').toLowerCase();
+    const tags = normalizeGuestTags(guest.group);
+    return name.includes(keyword) || side.includes(keyword) || tags.some(t => t.toLowerCase().includes(keyword));
+}
+
 // 初始化平面圖
 const floorPlan = document.getElementById('floor-plan');
 layout.forEach(row => {
@@ -112,7 +139,6 @@ function renderModalContent(tableNum) {
     guests.forEach((guest, index) => {
         const name = guest.name;
         const side = guest.side || "";
-        const group = guest.group || "";
         const key = `${tableNum}_${name}`;
         
         let rawArrived = statusState[key]?.arrived;
@@ -131,7 +157,7 @@ function renderModalContent(tableNum) {
                 <span class="font-bold text-gray-800 ${isJwsRow ? 'text-gray-500 text-sm pl-3 italic' : ''}">${name}</span>
                 <div class="flex gap-1 mt-1">
                     <span class="px-2 py-0.5 rounded text-xs font-bold ${side === '女方' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}">${side}</span>
-                    <span class="px-2 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-700">${group}</span>
+                    ${guestTagSpans(guest)}
                 </div>
             </div>
             <div class="flex gap-1 items-center">
@@ -188,12 +214,12 @@ function addNewGuestInline(tableNum) {
     const newName = prompt("請輸入新賓客姓名 (若是眷屬，請遵循：主客姓名 眷屬 X):");
     if (!newName || newName.trim() === "") return;
     const side = prompt("男方 定 女方？", "男方");
-    const group = prompt("屬於邊個分類？ (例如: 家人 / LK / BDO / RSM)", "現場加座");
+    const group = prompt("屬於邊個分類？多個請用 | 分隔 (例如: 家人|LK)", "現場加座");
     
     database.ref(`wedding_guests/${tableNum}/${nextIndex}`).set({
         name: newName.trim(),
         side: side ? side.trim() : "男方",
-        group: group ? group.trim() : "現場加座"
+        group: normalizeGuestTags(group ? group.trim() : "現場加座")
     });
 }
 
@@ -241,11 +267,7 @@ function handleSearch() {
         guests.forEach(guest => {
             const name = guest.name;
             const side = guest.side || "";
-            const group = guest.group || "";
-            
-            if (name.toLowerCase().includes(keyword) || 
-                side.toLowerCase().includes(keyword) || 
-                group.toLowerCase().includes(keyword)) {
+            if (guestMatchesKeyword(guest, keyword)) {
                 
                 hasResults = true;
                 const key = `${tableNum}_${name}`;
@@ -266,7 +288,7 @@ function handleSearch() {
                         <span class="text-xs text-red-700 font-medium mt-1">
                             第 ${tableNum} 桌 • 
                             <span class="px-1.5 py-0.5 rounded text-xs font-bold ${side === '女方' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}">${side}</span>
-                            <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-xs font-bold">${group}</span>
+                            ${guestTagSpans(guest)}
                         </span>
                     </div>
                     <div class="flex gap-1 items-center">

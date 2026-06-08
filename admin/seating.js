@@ -10,6 +10,20 @@ let tableSettings = {};
 let activeSettingTableNum = null;
 let selectedGuestContext = null;
 
+function normalizeGuestTags(val) {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.map(t => String(t).trim()).filter(t => t && t !== '未分類');
+    const s = String(val).trim();
+    if (!s || s === '未分類') return [];
+    if (s.includes('|')) return s.split('|').map(t => t.trim()).filter(t => t && t !== '未分類');
+    return [s];
+}
+
+function getPrimaryGroup(guest) {
+    const tags = normalizeGuestTags(guest.group);
+    return tags[0] || '未分類';
+}
+
 // ==========================================
 // 📌 畫布初始化與平移縮放 (已修復空白處拉唔郁問題)
 // ==========================================
@@ -154,7 +168,7 @@ function renderSidebar() {
 
     unassignedPool.forEach((guest, index) => {
         if (!guest || !guest.name) return;
-        const gName = guest.group || "未分類";
+        const gName = getPrimaryGroup(guest);
         
         if (guest.side === '男方') {
             maleCount++;
@@ -327,7 +341,7 @@ function allowDrop(e) { e.preventDefault(); }
 function openGuestModal(guest, tableNum, seatIdx) {
     selectedGuestContext = { guest, tableNum, seatIdx };
     document.getElementById('edit-guest-name').value = guest.name;
-    document.getElementById('edit-guest-group').value = guest.group || '';
+    document.getElementById('edit-guest-group').value = normalizeGuestTags(guest.group).join('|');
     document.getElementById('edit-guest-side').value = guest.side === '女方' ? '女方' : '男方';
     document.getElementById('md-guest-seat').innerText = `第 ${tableNum} 桌 - 座位 ${seatIdx + 1}`;
     document.getElementById('guest-detail-modal').classList.remove('hidden');
@@ -344,7 +358,7 @@ function saveGuestChangesAction() {
     const tableIdx = parseInt(tableNum);
 
     const newName = document.getElementById('edit-guest-name').value.trim();
-    const newGroup = document.getElementById('edit-guest-group').value.trim();
+    const newGroup = normalizeGuestTags(document.getElementById('edit-guest-group').value.trim());
     const newSide = document.getElementById('edit-guest-side').value;
 
     if (!newName) { alert("❌ 姓名不能為空！"); return; }

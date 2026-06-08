@@ -35,6 +35,18 @@
     animation: highlight-new 1.5s ease-out forwards;
 }
 
+/* 多選標籤 chip */
+.tag-chip {
+    line-height: 1.2;
+}
+.tag-chip button {
+    font-size: 12px;
+    padding: 0 1px;
+}
+.row-tag-add-select {
+    font-size: 11px;
+}
+
 /* 📌 透過 CSS 限制觸控行為與打字放大 */
 html, body {
     /* 限制整個網頁的觸控縮放行為 */

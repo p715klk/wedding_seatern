@@ -9,7 +9,99 @@ function colWidthByText(text, { min = 40, max = 280, pad = 24, charW = 13 } = {}
 function getLabelColumnWidth(colKey, colName) {
     const options = categoriesByColumn[colKey] || [];
     const longest = options.reduce((a, b) => (a.length >= b.length ? a : b), colName);
-    return colWidthByText(longest, { min: colWidthByText(colName, { min: 72, max: 200 }), max: 220 });
+    let sample = longest;
+    if (localGuestsList.length) {
+        const widestGuest = localGuestsList.reduce((a, g) => {
+            const txt = normalizeTags(g[colKey]).join(' ');
+            return txt.length > a.length ? txt : a;
+        }, '');
+        if (widestGuest.length > sample.length) sample = widestGuest;
+    }
+    return colWidthByText(sample, { min: colWidthByText(colName, { min: 140, max: 200 }), max: 280 });
+}
+
+function readTagsFromRow(row, columnKey) {
+    const container = row.querySelector(`.row-multi-tags[data-column-key="${columnKey}"]`);
+    if (!container) return [];
+    return [...container.querySelectorAll('.tag-chip')].map(chip => chip.dataset.tag);
+}
+
+function buildTagChipHTML(tag, columnKey) {
+    const safe = tag.replace(/"/g, '&quot;');
+    return `<span class="tag-chip inline-flex items-center gap-0.5 bg-red-100 text-red-800 px-1.5 py-0.5 rounded text-[10px] font-bold" data-tag="${safe}">${tag}<button type="button" onclick="removeTagFromRow(this,'${columnKey}')" class="text-red-500 hover:text-red-700 font-black leading-none">×</button></span>`;
+}
+
+function buildTagAddSelectHTML(columnKey, selectedTags) {
+    const optionsArr = categoriesByColumn[columnKey] || ['未分類'];
+    const available = optionsArr.filter(cat => !selectedTags.includes(cat));
+    let optsHTML = `<option value="">＋ 加入標籤...</option>`;
+    optsHTML += available.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+    optsHTML += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂選項...</option>`;
+    return `<select onchange="handleTagAdd(this, '${columnKey}')" class="row-tag-add-select w-full border border-red-200 bg-red-50/20 rounded p-1 text-xs font-bold focus:bg-white row-tag-add-select-${columnKey}">${optsHTML}</select>`;
+}
+
+function buildMultiTagCellHTML(columnKey, tags) {
+    const chips = tags.map(t => buildTagChipHTML(t, columnKey)).join('');
+    return `
+        <td class="py-2 px-2 align-top">
+            <div class="row-multi-tags" data-column-key="${columnKey}">
+                <div class="tag-chips-container flex flex-wrap gap-1 mb-1 min-h-[22px]">${chips}</div>
+                ${buildTagAddSelectHTML(columnKey, tags)}
+            </div>
+        </td>
+    `;
+}
+
+function refreshTagAddSelect(row, columnKey) {
+    const select = row.querySelector(`.row-tag-add-select-${columnKey}`);
+    if (!select) return;
+    const selected = readTagsFromRow(row, columnKey);
+    select.outerHTML = buildTagAddSelectHTML(columnKey, selected);
+}
+
+function refreshAllTagAddSelects(columnKey) {
+    tbody.querySelectorAll('tr').forEach(row => {
+        if (row.querySelector('.row-name-input')) refreshTagAddSelect(row, columnKey);
+    });
+}
+
+function handleTagAdd(selectEl, columnKey) {
+    const val = selectEl.value;
+    if (!val) return;
+    if (val === '__NEW__') {
+        activeSelectElement = selectEl;
+        activeColumnKey = columnKey;
+        document.getElementById('custom-category-input').value = '';
+        document.getElementById('custom-dialog-overlay').classList.remove('hidden');
+        selectEl.value = '';
+        return;
+    }
+    const row = selectEl.closest('tr');
+    const chipsContainer = row.querySelector('.tag-chips-container');
+    const current = readTagsFromRow(row, columnKey);
+    if (!current.includes(val)) {
+        chipsContainer.insertAdjacentHTML('beforeend', buildTagChipHTML(val, columnKey));
+    }
+    refreshTagAddSelect(row, columnKey);
+}
+
+function removeTagFromRow(btn, columnKey) {
+    const row = btn.closest('tr');
+    btn.closest('.tag-chip').remove();
+    refreshTagAddSelect(row, columnKey);
+}
+
+function collectGuestFromRow(row) {
+    const nameInput = row.querySelector('.row-name-input');
+    if (!nameInput) return null;
+    let guest = {
+        name: nameInput.value.trim(),
+        side: row.querySelector('.row-side-select').value,
+        table: row.querySelector('.row-table-input').value.trim(),
+        sort: row.querySelector('.row-seat-num') ? row.querySelector('.row-seat-num').innerText : '99',
+        group: readTagsFromRow(row, PRIMARY_TAG_KEY)
+    };
+    return guest.name ? guest : null;
 }
 
 // ==========================================
@@ -82,42 +174,6 @@ function renderThead() {
     initResizableColumns(); 
 }
 
-// 橫向擴充全新標籤分類欄
-function addNewCustomLabelColumn() {
-    const colNum = labelColumnsKeys.length + 1;
-    const newKey = `label_${Date.now()}`;
-    const newName = `標籤 ${colNum}`;
-
-    labelColumnsKeys.push(newKey);
-    labelColumnsNames.push(newName);
-    const firstColKey = labelColumnsKeys[0];
-    categoriesByColumn[newKey] = [...(categoriesByColumn[firstColKey] || ['未分類'])];
-
-    renderThead();
-    
-    const rows = tbody.querySelectorAll('tr');
-    let currentDOMList = [];
-    rows.forEach(row => {
-        const nameInput = row.querySelector('.row-name-input');
-        if (!nameInput) return;
-        
-        let guest = {
-            name: nameInput.value.trim(),
-            side: row.querySelector('.row-side-select').value,
-            table: row.querySelector('.row-table-input').value.trim(),
-            sort: row.querySelector('.row-seat-num') ? row.querySelector('.row-seat-num').innerText : '99'
-        };
-        labelColumnsKeys.forEach(k => {
-            const sel = row.querySelector(`.row-label-select-${k}`);
-            guest[k] = sel ? sel.value : '未分類';
-        });
-        currentDOMList.push(guest);
-    });
-
-    localGuestsList = currentDOMList;
-    renderDOMRows();
-}
-
 // 表格數據列渲染
 function renderDOMRows() {
     tbody.innerHTML = '';
@@ -144,22 +200,12 @@ function renderDOMRows() {
                    class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white row-table-input">
         `;
 
-        let labelsTdHTML = '';
-        labelColumnsKeys.forEach(key => {
-            const currentVal = guest[key] || '未分類';
-            const optionsArr = categoriesByColumn[key] || ['未分類'];
-            if (!optionsArr.includes(currentVal)) optionsArr.push(currentVal);
-
-            let optsHTML = optionsArr.map(cat => `<option value="${cat}" ${currentVal === cat ? 'selected' : ''}>${cat}</option>`).join('');
-            labelsTdHTML += `
-                <td class="py-2 px-2">
-                    <select onchange="handleGroupChange(this, '${key}')" class="w-full border border-red-200 bg-red-50/20 rounded p-1 text-xs font-bold focus:bg-white row-label-select-${key}">
-                        ${optsHTML}
-                        <option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂選項...</option>
-                    </select>
-                </td>
-            `;
+        const tags = normalizeTags(guest[PRIMARY_TAG_KEY]);
+        tags.forEach(t => {
+            const pool = categoriesByColumn[PRIMARY_TAG_KEY] || [];
+            if (!pool.includes(t)) pool.push(t);
         });
+        const labelsTdHTML = buildMultiTagCellHTML(PRIMARY_TAG_KEY, tags);
 
         tr.innerHTML = `
             <td class="py-2 px-2 text-center font-mono text-gray-400 font-bold row-sort-num">${index + 1}</td>
@@ -198,19 +244,7 @@ function addNewGuestRow() {
                class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white row-table-input">
     `;
 
-    let labelsTdHTML = '';
-    labelColumnsKeys.forEach(key => {
-        const optionsArr = categoriesByColumn[key] || ['未分類'];
-        let optsHTML = optionsArr.map(cat => `<option value="${cat}">${cat}</option>`).join('');
-        labelsTdHTML += `
-            <td class="py-2 px-2">
-                <select onchange="handleGroupChange(this, '${key}')" class="w-full border border-red-200 bg-red-50/20 rounded p-1 text-xs font-bold focus:bg-white row-label-select-${key}">
-                    ${optsHTML}
-                    <option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂選項...</option>
-                </select>
-            </td>
-        `;
-    });
+    const labelsTdHTML = buildMultiTagCellHTML(PRIMARY_TAG_KEY, []);
 
     const nextIndex = tbody.children.length + 1;
 
@@ -233,16 +267,6 @@ function addNewGuestRow() {
     scrollContainer.scrollTop = scrollContainer.scrollHeight; 
 }
 
-function handleGroupChange(selectEl, columnKey) {
-    if (selectEl.value === '__NEW__') {
-        activeSelectElement = selectEl;
-        activeColumnKey = columnKey;
-        document.getElementById('custom-category-input').value = '';
-        document.getElementById('custom-dialog-overlay').classList.remove('hidden');
-        selectEl.value = categoriesByColumn[columnKey][0] || '未分類'; 
-    }
-}
-
 function closeCustomCategoryDialog(isConfirm) {
     const overlay = document.getElementById('custom-dialog-overlay');
     const inputEl = document.getElementById('custom-category-input');
@@ -252,13 +276,14 @@ function closeCustomCategoryDialog(isConfirm) {
         const newCat = inputEl.value.trim();
         if (newCat && !categoriesByColumn[activeColumnKey].includes(newCat)) {
             categoriesByColumn[activeColumnKey].push(newCat);
-            const allSelects = tbody.querySelectorAll(`.row-label-select-${activeColumnKey}`);
-            allSelects.forEach(sel => {
-                const savedVal = sel.value;
-                let optsHTML = categoriesByColumn[activeColumnKey].map(cat => `<option value="${cat}" ${savedVal === cat ? 'selected' : ''}>${cat}</option>`).join('');
-                sel.innerHTML = `${optsHTML}<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂選項...</option>`;
-            });
-            activeSelectElement.value = newCat;
+            refreshAllTagAddSelects(activeColumnKey);
+            const row = activeSelectElement.closest('tr');
+            const chipsContainer = row.querySelector('.tag-chips-container');
+            const current = readTagsFromRow(row, activeColumnKey);
+            if (!current.includes(newCat)) {
+                chipsContainer.insertAdjacentHTML('beforeend', buildTagChipHTML(newCat, activeColumnKey));
+            }
+            refreshTagAddSelect(row, activeColumnKey);
         }
     }
     activeSelectElement = null;

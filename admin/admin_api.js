@@ -7,9 +7,17 @@ function loadFirebaseData() {
     database.ref('meta_label_columns').once('value').then(metaSnapshot => {
         const meta = metaSnapshot.val();
         if (meta && meta.keys && meta.names) {
-            labelColumnsKeys = meta.keys;
-            labelColumnsNames = meta.names;
-            categoriesByColumn = meta.categories || categoriesByColumn;
+            const legacyKeys = meta.keys;
+            const mergedPool = new Set(categoriesByColumn[PRIMARY_TAG_KEY] || []);
+            legacyKeys.forEach(k => {
+                (meta.categories?.[k] || []).forEach(c => mergedPool.add(c));
+            });
+            labelColumnsKeys = [PRIMARY_TAG_KEY];
+            labelColumnsNames = ['標籤 (可多選)'];
+            categoriesByColumn = { [PRIMARY_TAG_KEY]: [...mergedPool] };
+            window._legacyLabelKeys = legacyKeys.length > 1 ? legacyKeys : null;
+        } else {
+            window._legacyLabelKeys = null;
         }
 
         return Promise.all([
@@ -38,14 +46,13 @@ function processFirebaseData(weddingGuests, unassignedGuests) {
         if (Array.isArray(list)) {
             list.forEach(guest => {
                 if (guest && guest.name) {
-                    let dynamicLabels = {};
-                    labelColumnsKeys.forEach(k => { dynamicLabels[k] = guest[k] || '未分類'; });
+                    const mergeKeys = window._legacyLabelKeys || labelColumnsKeys;
                     localGuestsList.push({
                         name: guest.name,
                         side: guest.side || '男方',
                         table: parseInt(tableNum), 
                         sort: guest.sort || 1,
-                        ...dynamicLabels
+                        group: mergeGuestLabelsToTags(guest, mergeKeys)
                     });
                 }
             });
@@ -56,14 +63,13 @@ function processFirebaseData(weddingGuests, unassignedGuests) {
     if (Array.isArray(unassignedGuests)) {
         unassignedGuests.forEach(guest => {
             if (guest && guest.name) {
-                let dynamicLabels = {};
-                labelColumnsKeys.forEach(k => { dynamicLabels[k] = guest[k] || '未分類'; });
+                const mergeKeys = window._legacyLabelKeys || labelColumnsKeys;
                 localGuestsList.push({
                     name: guest.name,
                     side: guest.side || '男方',
                     table: '', 
                     sort: 99,
-                    ...dynamicLabels
+                    group: mergeGuestLabelsToTags(guest, mergeKeys)
                 });
             }
         });
@@ -98,10 +104,8 @@ function saveAllToFirebase() {
         if (!gName) return; 
 
         let guestData = { name: gName, side: gSide };
-        labelColumnsKeys.forEach(key => {
-            const sel = row.querySelector(`.row-label-select-${key}`);
-            guestData[key] = sel ? sel.value : '未分類';
-        });
+        const tags = readTagsFromRow(row, PRIMARY_TAG_KEY);
+        guestData[PRIMARY_TAG_KEY] = tags.length ? tags : [];
 
         if (gTableRaw === "" || isNaN(gTableRaw)) {
             guestData.sort = 99;
@@ -128,8 +132,7 @@ function saveAllToFirebase() {
 // ==========================================
 function exportToCSV() {
     if (localGuestsList.length === 0) return;
-    let headers = ["姓名", "來源(男方/女方)", "分配桌次"];
-    labelColumnsNames.forEach(n => headers.push(n));
+    let headers = ["姓名", "來源(男方/女方)", "分配桌次", "標籤(多選以|分隔)"];
     let csvContent = "\uFEFF" + headers.join(",") + "\n";
     
     tbody.querySelectorAll('tr').forEach(row => {
@@ -140,11 +143,8 @@ function exportToCSV() {
         const side = row.querySelector('.row-side-select').value;
 
         if (name) {
-            let rowCells = [`"${name}"`, `"${side}"`, `"${table}"`];
-            labelColumnsKeys.forEach(key => {
-                const sel = row.querySelector(`.row-label-select-${key}`);
-                rowCells.push(`"${sel ? sel.value : ''}"`);
-            });
+            const tags = readTagsFromRow(row, PRIMARY_TAG_KEY);
+            let rowCells = [`"${name}"`, `"${side}"`, `"${table}"`, `"${tags.join('|')}"`];
             csvContent += rowCells.join(",") + "\n";
         }
     });
@@ -175,12 +175,13 @@ function importCSVAction() {
             if (parts.length >= 2) {
                 const name = parts[0].replace(/"/g, '').trim();
                 const side = parts[1] ? parts[1].replace(/"/g, '').trim() : '男方';
-                const group = parts[2] ? parts[2].replace(/"/g, '').trim() : '未分類';
-                const tableRaw = parts[3] ? parts[3].replace(/"/g, '').trim() : '';
+                const tableRaw = parts[2] ? parts[2].replace(/"/g, '').trim() : '';
+                const tagsRaw = parts[3] ? parts[3].replace(/"/g, '').trim() : '';
 
                 if (name) {
                     importedGuests.push({
-                        name: name, side: side, group: group,
+                        name: name, side: side,
+                        group: normalizeTags(tagsRaw),
                         table: tableRaw !== "" ? parseInt(tableRaw) : ""
                     });
                 }
