@@ -1,16 +1,15 @@
 // ==========================================
-// 📌 2. Firebase 雙節點精準讀取
+// 📌 2. Firebase 精準讀取與多重標籤解析
 // ==========================================
 function loadFirebaseData() {
     tbody.innerHTML = `<tr><td class="text-center py-8 text-gray-400 font-bold">⏳ 正在從 Firebase 載入名單數據...</td></tr>`;
     
-    // 同步拿取架構欄位配置
     database.ref('meta_label_columns').once('value').then(metaSnapshot => {
         const meta = metaSnapshot.val();
         if (meta && meta.keys && meta.names) {
             labelColumnsKeys = meta.keys;
             labelColumnsNames = meta.names;
-            categoriesByColumn = meta.categories || { 'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學'] };
+            categoriesByColumn = meta.categories || categoriesByColumn;
         }
 
         return Promise.all([
@@ -26,26 +25,21 @@ function loadFirebaseData() {
         }
     }).catch(err => {
         console.error("Firebase 載入失敗:", err);
-        tbody.innerHTML = `<tr><td class="text-center py-8 text-red-500 font-bold">❌ 數據載入失敗: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td class="text-center py-8 text-red-500 font-bold">❌ 數據載入失敗</td></tr>`;
     });
 }
 
-// 解析 Firebase 數據並合併
 function processFirebaseData(weddingGuests, unassignedGuests) {
     localGuestsList = [];
 
-    // 1. 已分配
+    // 已分配桌次賓客
     Object.keys(weddingGuests).forEach(tableNum => {
         const list = weddingGuests[tableNum];
         if (Array.isArray(list)) {
             list.forEach(guest => {
                 if (guest && guest.name) {
-                    // 承接多重標籤
                     let dynamicLabels = {};
-                    labelColumnsKeys.forEach(k => {
-                        dynamicLabels[k] = guest[k] || '未分類';
-                    });
-
+                    labelColumnsKeys.forEach(k => { dynamicLabels[k] = guest[k] || '未分類'; });
                     localGuestsList.push({
                         name: guest.name,
                         side: guest.side || '男方',
@@ -58,15 +52,12 @@ function processFirebaseData(weddingGuests, unassignedGuests) {
         }
     });
 
-    // 2. 未分配
+    // 未分配賓客
     if (Array.isArray(unassignedGuests)) {
         unassignedGuests.forEach(guest => {
             if (guest && guest.name) {
                 let dynamicLabels = {};
-                labelColumnsKeys.forEach(k => {
-                    dynamicLabels[k] = guest[k] || '未分類';
-                });
-
+                labelColumnsKeys.forEach(k => { dynamicLabels[k] = guest[k] || '未分類'; });
                 localGuestsList.push({
                     name: guest.name,
                     side: guest.side || '男方',
@@ -78,19 +69,18 @@ function processFirebaseData(weddingGuests, unassignedGuests) {
         });
     }
 
-    renderThead();
-    renderDOMRows(); 
+    renderThead();   // 呼叫 UI 模組生成表頭
+    renderDOMRows(); // 呼叫 UI 模組渲染行數
 }
 
 // ==========================================
-// 📌 3. 收集多標籤 DOM 數據並儲存回 Firebase
+// 📌 3. 儲存雙節點與欄位架構
 // ==========================================
 function saveAllToFirebase() {
     const rows = tbody.querySelectorAll('tr');
     let newWeddingGuests = {};   
     let newUnassignedGuests = [];
 
-    // 先儲存動態欄位架構 meta 數據
     database.ref('meta_label_columns').set({
         keys: labelColumnsKeys,
         names: labelColumnsNames,
@@ -98,30 +88,19 @@ function saveAllToFirebase() {
     });
 
     rows.forEach((row) => {
-        const inputs = row.querySelectorAll('input[type="text"], input[type="number"]');
-        const selects = row.querySelectorAll('select');
+        const nameInput = row.querySelector('.row-name-input');
+        if (!nameInput) return;
 
-        if (inputs.length < 2 || selects.length < 1) return;
-
-        const gTableRaw = row.querySelector('.row-table-input').value.trim(); 
-        const gName = row.querySelector('.row-name-input').value.trim();
+        const gName = nameInput.value.trim();
         const gSide = row.querySelector('.row-side-select').value;
+        const gTableRaw = row.querySelector('.row-table-input').value.trim(); 
 
         if (!gName) return; 
 
-        // 動態抓取這一列所有自訂擴充標籤嘅選取值
-        let guestData = {
-            name: gName,
-            side: gSide
-        };
-
-        labelColumnsKeys.forEach((key, idx) => {
-            const labelSelect = row.querySelector(`.row-label-select-${key}`);
-            if (labelSelect) {
-                guestData[key] = labelSelect.value;
-            } else {
-                guestData[key] = '未分類';
-            }
+        let guestData = { name: gName, side: gSide };
+        labelColumnsKeys.forEach(key => {
+            const sel = row.querySelector(`.row-label-select-${key}`);
+            guestData[key] = sel ? sel.value : '未分類';
         });
 
         if (gTableRaw === "" || isNaN(gTableRaw)) {
@@ -129,9 +108,7 @@ function saveAllToFirebase() {
             newUnassignedGuests.push(guestData);
         } else {
             const targetTable = parseInt(gTableRaw);
-            if (!newWeddingGuests[targetTable]) {
-                newWeddingGuests[targetTable] = [];
-            }
+            if (!newWeddingGuests[targetTable]) newWeddingGuests[targetTable] = [];
             guestData.sort = newWeddingGuests[targetTable].length + 1;
             newWeddingGuests[targetTable].push(guestData);
         }
@@ -141,29 +118,23 @@ function saveAllToFirebase() {
         database.ref('wedding_guests').set(newWeddingGuests),
         database.ref('unassigned_guests').set(newUnassignedGuests)
     ]).then(() => {
-        alert("✨ 【動態多重標籤數據同步成功】！");
+        alert("✨ 【後台數據同步成功】！已完美推送至畫布。");
         loadFirebaseData();
-    }).catch(err => {
-        alert("❌ 儲存失敗: " + err.message);
-    });
+    }).catch(err => alert("❌ 儲存失敗: " + err.message));
 }
 
 // ==========================================
-// 📌 4. CSV 匯出邏輯 (自動適應未知長度嘅自訂標籤行)
+// 📌 4. CSV 備份
 // ==========================================
 function exportToCSV() {
-    if (localGuestsList.length === 0) { alert("目前沒有數據可導出！"); return; }
-    
-    // 動態組成 Header 行
+    if (localGuestsList.length === 0) return;
     let headers = ["姓名", "來源(男方/女方)", "分配桌次"];
     labelColumnsNames.forEach(n => headers.push(n));
     let csvContent = "\uFEFF" + headers.join(",") + "\n";
     
-    const rows = tbody.querySelectorAll('tr');
-    rows.forEach(row => {
+    tbody.querySelectorAll('tr').forEach(row => {
         const nameEl = row.querySelector('.row-name-input');
         if (!nameEl) return;
-        
         const name = nameEl.value.trim();
         const table = row.querySelector('.row-table-input').value.trim();
         const side = row.querySelector('.row-side-select').value;
@@ -181,8 +152,43 @@ function exportToCSV() {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `wedding_multi_labels_${new Date().toISOString().slice(0,10)}.csv`);
+    link.setAttribute("download", `wedding_guests_export.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+function importCSVAction() {
+    const fileInput = document.getElementById('csv-file-input');
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+        const lines = e.target.result.split('\n');
+        let importedGuests = [];
+
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            const parts = line.split(',');
+            if (parts.length >= 2) {
+                const name = parts[0].replace(/"/g, '').trim();
+                const side = parts[1] ? parts[1].replace(/"/g, '').trim() : '男方';
+                const group = parts[2] ? parts[2].replace(/"/g, '').trim() : '未分類';
+                const tableRaw = parts[3] ? parts[3].replace(/"/g, '').trim() : '';
+
+                if (name) {
+                    importedGuests.push({
+                        name: name, side: side, group: group,
+                        table: tableRaw !== "" ? parseInt(tableRaw) : ""
+                    });
+                }
+            }
+        }
+        localGuestsList = importedGuests;
+        renderDOMRows();
+        recalculateSortNumbersFromDOM();
+    };
+    reader.readAsText(file, 'UTF-8');
 }
