@@ -99,7 +99,7 @@ function handleModalTagAdd(selectEl, columnKey) {
         activeSelectElement = selectEl;
         activeColumnKey = columnKey;
         document.getElementById('custom-category-input').value = '';
-        document.getElementById('custom-dialog-overlay').classList.remove('hidden');
+        showModal(document.getElementById('custom-dialog-overlay'));
         selectEl.value = '';
         return;
     }
@@ -115,7 +115,7 @@ function removeModalTag(btn, columnKey) {
 function closeCustomCategoryDialog(isConfirm) {
     const overlay = document.getElementById('custom-dialog-overlay');
     const inputEl = document.getElementById('custom-category-input');
-    overlay.classList.add('hidden');
+    hideModal(overlay);
 
     if (isConfirm && activeColumnKey) {
         const newCat = inputEl.value.trim();
@@ -137,6 +137,40 @@ function persistMetaLabelColumns() {
         names: ['標籤 (可多選)'],
         categories: categoriesByColumn
     });
+}
+
+function showModal(el) {
+    el.classList.remove('hidden');
+    el.style.display = 'flex';
+}
+
+function hideModal(el) {
+    el.classList.add('hidden');
+    el.style.display = '';
+}
+
+function bindGuestTap(element, onTap) {
+    let startX = 0, startY = 0, moved = false;
+    element.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        startX = e.clientX;
+        startY = e.clientY;
+        moved = false;
+    });
+    element.addEventListener('pointermove', (e) => {
+        if (Math.hypot(e.clientX - startX, e.clientY - startY) > 6) moved = true;
+    });
+    element.addEventListener('pointerup', (e) => {
+        if (e.button !== 0 || moved) return;
+        e.stopPropagation();
+        onTap(e);
+    });
+}
+
+function setPrimaryGroupTag(guest, newPrimary) {
+    const tags = normalizeGuestTags(guest.group);
+    const rest = tags.filter(t => t !== newPrimary);
+    guest.group = newPrimary === '未分類' ? rest : [newPrimary, ...rest];
 }
 
 // ==========================================
@@ -209,15 +243,12 @@ function zoomCanvas(factor) {
 let isSidebarOpen = true;
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar-panel');
-    const toggleBtn = document.getElementById('sidebar-toggle-btn');
     const icon = document.getElementById('sidebar-toggle-icon');
     if (isSidebarOpen) {
         sidebar.classList.add('collapsed');
-        toggleBtn.classList.add('collapsed');
         icon.innerText = "▶";
     } else {
         sidebar.classList.remove('collapsed');
-        toggleBtn.classList.remove('collapsed');
         icon.innerText = "◀";
     }
     isSidebarOpen = !isSidebarOpen;
@@ -318,29 +349,42 @@ function renderSidebar() {
 function renderGroupData(groups, container) {
     Object.keys(groups).forEach(groupName => {
         const groupWrap = document.createElement('div');
-        groupWrap.className = "bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm w-full";
+        groupWrap.className = "pool-group-drop bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm w-full transition-colors";
+        groupWrap.dataset.groupName = groupName;
         groupWrap.innerHTML = `<h4 class="text-[11px] font-bold text-slate-400 mb-2.5 border-b border-slate-100 pb-1">🏷️ ${groupName}</h4>`;
+
+        groupWrap.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            groupWrap.classList.add('drag-over');
+        });
+        groupWrap.addEventListener('dragleave', (e) => {
+            if (!groupWrap.contains(e.relatedTarget)) {
+                groupWrap.classList.remove('drag-over');
+            }
+        });
+        groupWrap.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            groupWrap.classList.remove('drag-over');
+            handleDropOnPoolGroup(e, groupName);
+        });
         
         const chipsContainer = document.createElement('div');
         chipsContainer.className = "grid grid-cols-2 gap-2";
 
         groups[groupName].forEach(item => {
             const chip = document.createElement('div');
-            chip.className = `text-xs p-2 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-pointer ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
+            chip.className = `text-xs p-2 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-grab active:cursor-grabbing ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
             chip.innerText = item.data.name;
             chip.setAttribute('draggable', 'true');
 
-            let chipDragged = false;
             chip.addEventListener('dragstart', (e) => {
-                chipDragged = true;
+                e.stopPropagation();
                 e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: "POOL", index: item.originalIndex, name: item.data.name }));
             });
-            chip.addEventListener('dragend', () => {
-                setTimeout(() => { chipDragged = false; }, 0);
-            });
-            chip.addEventListener('click', (e) => {
-                if (chipDragged) return;
-                e.stopPropagation();
+
+            bindGuestTap(chip, () => {
                 openGuestModal(item.data, null, null, item.originalIndex);
             });
 
@@ -417,8 +461,7 @@ function renderCanvasTables() {
                 seatSlot.innerHTML = `<span class="text-ellipsis" title="${guest.name}">${guest.name}</span>`;
                 seatSlot.setAttribute('draggable', 'true');
 
-                seatSlot.addEventListener('click', (e) => {
-                    e.stopPropagation();
+                bindGuestTap(seatSlot, () => {
                     openGuestModal(guest, tableNum, i);
                 });
 
@@ -477,11 +520,11 @@ function openGuestModal(guest, tableNum, seatIdx, poolIndex) {
         ? '未安排'
         : `第 ${tableNum} 桌 - 座位 ${seatIdx + 1}`;
     document.getElementById('btn-remove-from-seat').classList.toggle('hidden', fromPool);
-    document.getElementById('guest-detail-modal').classList.remove('hidden');
+    showModal(document.getElementById('guest-detail-modal'));
 }
 
 function closeGuestModal() {
-    document.getElementById('guest-detail-modal').classList.add('hidden');
+    hideModal(document.getElementById('guest-detail-modal'));
     document.getElementById('btn-remove-from-seat').classList.remove('hidden');
     selectedGuestContext = null;
 }
@@ -595,6 +638,22 @@ function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
     } catch (err) { console.error(err); }
 }
 
+function handleDropOnPoolGroup(e, targetGroupName) {
+    try {
+        const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+        if (data.fromTable !== 'POOL') return;
+
+        const guest = unassignedPool[data.index];
+        if (!guest) return;
+
+        const currentPrimary = getPrimaryGroup(guest);
+        if (currentPrimary === targetGroupName) return;
+
+        setPrimaryGroupTag(guest, targetGroupName);
+        database.ref('unassigned_guests').set(unassignedPool);
+    } catch (err) { console.error(err); }
+}
+
 function handleDropTrash(e) {
     e.preventDefault();
     try {
@@ -645,11 +704,11 @@ function openSettingsModal(tableNum, currentMax) {
     activeSettingTableNum = tableNum;
     document.getElementById('modal-table-title').innerText = `⚙️ 調整第 ${tableNum} 桌設定`;
     document.getElementById('modal-max-seats').value = currentMax;
-    document.getElementById('table-settings-modal').classList.remove('hidden');
+    showModal(document.getElementById('table-settings-modal'));
 }
 
 function closeSettingsModal() {
-    document.getElementById('table-settings-modal').classList.add('hidden');
+    hideModal(document.getElementById('table-settings-modal'));
     activeSettingTableNum = null;
 }
 

@@ -57,22 +57,28 @@
         /* Side panel 覆蓋式收合 — 右邊畫布寬度不變 */
         #sidebar-panel {
             width: 320px;
-            transition: transform 0.3s ease-in-out, opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
-            visibility: visible;
-            opacity: 1;
+            pointer-events: none;
+            transition: transform 0.3s ease-in-out;
+        }
+        #sidebar-content {
+            pointer-events: auto;
+            transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
         }
         #sidebar-panel.collapsed {
             transform: translateX(-100%);
-            opacity: 0 !important;
-            visibility: hidden !important;
-            pointer-events: none !important;
+        }
+        #sidebar-panel.collapsed #sidebar-content {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
         }
         #sidebar-toggle-btn {
-            left: 320px;
-            transition: left 0.3s ease-in-out;
+            pointer-events: auto;
         }
-        #sidebar-toggle-btn.collapsed {
-            left: 0;
+        .pool-group-drop.drag-over {
+            outline: 2px solid #6366f1;
+            outline-offset: 2px;
+            background-color: #eef2ff;
         }
 
         .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -109,34 +115,36 @@
             <div class="workspace-canvas" id="main-canvas" ondragover="allowDrop(event)"></div>
         </main>
 
-        <aside id="sidebar-panel" class="absolute left-0 top-0 bottom-0 z-20 bg-white border-r border-slate-200 flex flex-col shadow-xl overflow-hidden" ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
+        <aside id="sidebar-panel" class="absolute left-0 top-0 bottom-0 z-20">
+            <div id="sidebar-content" class="bg-white border-r border-slate-200 flex flex-col h-full shadow-xl overflow-hidden w-[320px]" ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
 
-            <div class="p-4 bg-white shrink-0 w-[320px] border-b border-slate-100">
-                <h2 class="text-xl font-black text-slate-800 tracking-wide">未安排名單</h2>
+                <div class="p-4 bg-white shrink-0 border-b border-slate-100">
+                    <h2 class="text-xl font-black text-slate-800 tracking-wide">未安排名單</h2>
+                </div>
+
+                <div class="flex-1 overflow-y-auto bg-slate-50/40 no-scrollbar pb-12" id="single-scroll-pool" ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
+
+                    <div class="px-4 py-2 bg-blue-50/60 flex items-center sticky top-0 border-b border-blue-100 z-10 shadow-sm">
+                        <span class="text-xs font-black text-blue-700 tracking-wider">♂️ 男方名單</span>
+                    </div>
+                    <div id="pool-male" class="p-4 space-y-4 min-h-[60px]"></div>
+
+                    <div class="px-4 py-2 bg-rose-50/60 flex items-center sticky top-0 border-b border-rose-100 border-t border-slate-100 z-10 shadow-sm">
+                        <span class="text-xs font-black text-rose-700 tracking-wider">♀️ 女方名單</span>
+                    </div>
+                    <div id="pool-female" class="p-4 space-y-4 min-h-[60px]"></div>
+
+                </div>
             </div>
 
-            <div class="flex-1 overflow-y-auto bg-slate-50/40 no-scrollbar w-[320px] pb-12" id="single-scroll-pool" ondragover="allowDrop(event)" ondrop="handleDropTrash(event)">
-
-                <div class="px-4 py-2 bg-blue-50/60 flex items-center sticky top-0 border-b border-blue-100 z-10 shadow-sm">
-                    <span class="text-xs font-black text-blue-700 tracking-wider">♂️ 男方名單</span>
-                </div>
-                <div id="pool-male" class="p-4 space-y-4 min-h-[60px]"></div>
-
-                <div class="px-4 py-2 bg-rose-50/60 flex items-center sticky top-0 border-b border-rose-100 border-t border-slate-100 z-10 shadow-sm">
-                    <span class="text-xs font-black text-rose-700 tracking-wider">♀️ 女方名單</span>
-                </div>
-                <div id="pool-female" class="p-4 space-y-4 min-h-[60px]"></div>
-
-            </div>
+            <button id="sidebar-toggle-btn" onclick="toggleSidebar()" class="absolute -right-5 top-1/2 -translate-y-1/2 w-5 h-20 bg-indigo-600 text-white border border-indigo-500 rounded-r-xl shadow-md flex items-center justify-center font-black text-[10px] hover:bg-indigo-700 z-30">
+                <span id="sidebar-toggle-icon">◀</span>
+            </button>
         </aside>
-
-        <button id="sidebar-toggle-btn" onclick="toggleSidebar()" class="absolute top-1/2 -translate-y-1/2 w-5 h-20 bg-indigo-600 text-white border border-indigo-500 rounded-r-xl shadow-md flex items-center justify-center font-black text-[10px] hover:bg-indigo-700 z-30">
-            <span id="sidebar-toggle-icon">◀</span>
-        </button>
 
     </div>
 
-    <div id="guest-detail-modal" class="fixed inset-0 bg-slate-950/40 z-50 hidden flex items-center justify-center p-4">
+    <div id="guest-detail-modal" class="fixed inset-0 bg-slate-950/40 z-50 hidden items-center justify-center p-4">
         <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-slate-100">
             <div class="flex justify-between items-start mb-3">
                 <h3 class="text-sm font-black text-slate-900">✏️ 編輯賓客資料</h3>
@@ -176,7 +184,7 @@
         </div>
     </div>
 
-    <div id="custom-dialog-overlay" class="fixed inset-0 bg-black/50 z-[60] hidden flex items-center justify-center p-4">
+    <div id="custom-dialog-overlay" class="fixed inset-0 bg-black/50 z-[60] hidden items-center justify-center p-4">
         <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-gray-100">
             <h3 class="text-base font-bold text-gray-900 mb-2">➕ 新增自訂選項</h3>
             <p class="text-xs text-gray-500 mb-4">請輸入你想加入標籤清單的新選項名稱：</p>
@@ -188,7 +196,7 @@
         </div>
     </div>
 
-    <div id="table-settings-modal" class="fixed inset-0 bg-slate-950/40 z-50 hidden flex items-center justify-center p-4">
+    <div id="table-settings-modal" class="fixed inset-0 bg-slate-950/40 z-50 hidden items-center justify-center p-4">
         <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-slate-100">
             <h3 class="text-sm font-black text-slate-900 mb-3" id="modal-table-title">⚙️ 圓枱設定</h3>
             <div>
