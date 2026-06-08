@@ -167,12 +167,6 @@ function bindGuestTap(element, onTap) {
     });
 }
 
-function setPrimaryGroupTag(guest, newPrimary) {
-    const tags = normalizeGuestTags(guest.group);
-    const rest = tags.filter(t => t !== newPrimary);
-    guest.group = newPrimary === '未分類' ? rest : [newPrimary, ...rest];
-}
-
 // ==========================================
 // 📌 畫布初始化與平移縮放 (已修復空白處拉唔郁問題)
 // ==========================================
@@ -594,27 +588,9 @@ function renderSidebar() {
 function renderGroupData(groups, container) {
     Object.keys(groups).forEach(groupName => {
         const groupWrap = document.createElement('div');
-        groupWrap.className = "pool-group-drop bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm w-full transition-colors";
-        groupWrap.dataset.groupName = groupName;
+        groupWrap.className = "pool-group bg-white p-3 rounded-xl border border-slate-200/80 shadow-sm w-full";
         groupWrap.innerHTML = `<h4 class="pool-group-title text-xs font-bold text-slate-400 mb-2.5 border-b border-slate-100 pb-1">🏷️ ${groupName}</h4>`;
 
-        groupWrap.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            groupWrap.classList.add('drag-over');
-        });
-        groupWrap.addEventListener('dragleave', (e) => {
-            if (!groupWrap.contains(e.relatedTarget)) {
-                groupWrap.classList.remove('drag-over');
-            }
-        });
-        groupWrap.addEventListener('drop', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            groupWrap.classList.remove('drag-over');
-            handleDropOnPoolGroup(e, groupName);
-        });
-        
         const chipsContainer = document.createElement('div');
         chipsContainer.className = "grid grid-cols-2 gap-2";
 
@@ -626,7 +602,13 @@ function renderGroupData(groups, container) {
 
             chip.addEventListener('dragstart', (e) => {
                 e.stopPropagation();
+                cancelTableDrag();
+                isGuestDragging = true;
                 e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: "POOL", index: item.originalIndex, name: item.data.name }));
+            });
+            chip.addEventListener('dragend', () => {
+                isGuestDragging = false;
+                cancelTableDrag();
             });
 
             bindGuestTap(chip, () => {
@@ -713,8 +695,11 @@ function renderCanvasTables() {
                     openGuestModal(guest, tableNum, i);
                 });
 
-                seatSlot.addEventListener('mousedown', (e) => {
+                seatSlot.addEventListener('pointerdown', (e) => {
+                    if (e.button !== 0) return;
                     e.stopPropagation();
+                    cancelTableDrag();
+                    isGuestDragging = true;
                 });
                 seatSlot.addEventListener('dragstart', (e) => {
                     e.stopPropagation();
@@ -755,7 +740,7 @@ function renderCanvasTables() {
 }
 
 document.addEventListener('mousemove', (e) => {
-    if (!isDraggingTable || !draggedTableElement) return;
+    if (isGuestDragging || !isDraggingTable || !draggedTableElement) return;
     const pos = screenToCanvas(e.clientX, e.clientY);
     let bx = snapToGrid(pos.x - tableOffsetX);
     let by = snapToGrid(pos.y - tableOffsetY);
@@ -768,7 +753,10 @@ document.addEventListener('mousemove', (e) => {
 });
 
 document.addEventListener('mouseup', () => {
-    if (isGuestDragging) return;
+    if (isGuestDragging) {
+        cancelTableDrag();
+        return;
+    }
     if (isDraggingTable && draggedTableElement) {
         const bx = parseInt(draggedTableElement.dataset.baseX, 10);
         const by = parseInt(draggedTableElement.dataset.baseY, 10);
@@ -920,24 +908,16 @@ function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
     } catch (err) { console.error(err); }
 }
 
-function handleDropOnPoolGroup(e, targetGroupName) {
-    try {
-        const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        if (data.fromTable !== 'POOL') return;
-
-        const guest = unassignedPool[data.index];
-        if (!guest) return;
-
-        const currentPrimary = getPrimaryGroup(guest);
-        if (currentPrimary === targetGroupName) return;
-
-        setPrimaryGroupTag(guest, targetGroupName);
-        database.ref('unassigned_guests').set(unassignedPool);
-    } catch (err) { console.error(err); }
-}
+document.addEventListener('dragend', () => {
+    isGuestDragging = false;
+    cancelTableDrag();
+});
 
 function handleDropTrash(e) {
     e.preventDefault();
+    e.stopPropagation();
+    isGuestDragging = false;
+    cancelTableDrag();
     try {
         const dataStr = e.dataTransfer.getData('text/plain');
         if (!dataStr) return;
