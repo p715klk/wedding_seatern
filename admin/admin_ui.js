@@ -14,14 +14,17 @@ function renderDOMRows() {
         const tr = document.createElement('tr');
         tr.className = "hover:bg-gray-50 transition bg-white";
         
+        // 📥 修正 2：男女方拔除 ICON，只留純文字
         const sideSelectHTML = `
             <select class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white focus:ring-1 focus:ring-red-500 focus:outline-none">
-                <option value="男方" ${guest.side === '男方' ? 'selected' : ''}>♂️ 男方</option>
-                <option value="女方" ${guest.side === '女方' ? 'selected' : ''}>♀️ 女方</option>
+                <option value="男方" ${guest.side === '男方' ? 'selected' : ''}>男方</option>
+                <option value="女方" ${guest.side === '女方' ? 'selected' : ''}>女方</option>
             </select>
         `;
 
         let groupOptions = currentCategories.map(cat => `<option value="${cat}" ${guest.group === cat ? 'selected' : ''}>${cat}</option>`).join('');
+        
+        // 📥 修正 3：Dropdown 保留「+ 新增自訂分類...」功能，隨時可以加新標籤
         const groupSelectHTML = `
             <select onchange="handleGroupChange(this)" class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white focus:ring-1 focus:ring-red-500 focus:outline-none">
                 ${groupOptions}
@@ -31,7 +34,8 @@ function renderDOMRows() {
 
         const tableInputHTML = `
             <input type="number" min="1" max="99" placeholder="未安排" value="${guest.table || ''}" 
-                   class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white">
+                   oninput="recalculateSortNumbersFromDOM()" 
+                   class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white row-table-input">
         `;
 
         // Column 順序：拖拉 -> 排序 -> 分配桌次 -> 桌次座位 -> 賓客姓名 -> 來源分類 -> 標籤 -> 操作
@@ -62,10 +66,11 @@ function addNewGuestRow() {
     const tr = document.createElement('tr');
     tr.className = "hover:bg-gray-50 transition bg-white";
 
+    // 📥 修正 2：手動新增列同樣移除男女方 ICON
     const sideSelectHTML = `
         <select class="w-full border border-gray-200 rounded p-1 text-xs font-bold bg-transparent focus:bg-white">
-            <option value="男方" selected>♂️ 男方</option>
-            <option value="女方">♀️ 女方</option>
+            <option value="男方" selected>男方</option>
+            <option value="女方">女方</option>
         </select>
     `;
 
@@ -79,7 +84,8 @@ function addNewGuestRow() {
 
     const tableInputHTML = `
         <input type="number" min="1" max="99" placeholder="未安排" value="" 
-               class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white">
+               oninput="recalculateSortNumbersFromDOM()" 
+               class="w-full border border-gray-200 rounded p-1 text-xs font-mono font-bold text-center bg-transparent focus:bg-white row-table-input">
     `;
 
     const nextIndex = tbody.children.length + 1;
@@ -157,11 +163,33 @@ function deleteRowAction(btn) {
     recalculateSortNumbersFromDOM();
 }
 
+// 📥 修正 1：加強重新計算邏輯，當你拖放完或者改桌號，會自動根據 DOM 由上而下順序，精準計算出每個人喺各別桌子嘅「桌次座位」第幾個！
 function recalculateSortNumbersFromDOM() {
     const rows = tbody.querySelectorAll('tr');
+    let tableCounters = {}; // 用嚟記住每張桌子目前數到第幾個位
+
     rows.forEach((row, idx) => {
+        // 更新左邊嘅總「排序」
         const numEl = row.querySelector('.row-sort-num');
         if (numEl) numEl.innerText = idx + 1;
+
+        // 重新動態掃描「分配桌次」與計算「桌次座位」
+        const tableInput = row.querySelector('.row-table-input');
+        const seatEl = row.querySelector('.row-seat-num');
+        
+        if (tableInput && seatEl) {
+            const tVal = tableInput.value.trim();
+            if (tVal === "" || isNaN(tVal)) {
+                seatEl.innerText = '-';
+            } else {
+                const tableNum = parseInt(tVal);
+                if (!tableCounters[tableNum]) {
+                    tableCounters[tableNum] = 0;
+                }
+                tableCounters[tableNum]++; // 每見到同桌多一個人，座位號就 +1
+                seatEl.innerText = tableCounters[tableNum];
+            }
+        }
     });
 }
 
@@ -179,7 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
             animation: 150,
             ghostClass: 'sortable-ghost',
             onEnd: function () {
-                recalculateSortNumbersFromDOM();
+                recalculateSortNumbersFromDOM(); // 拖拉完成放手，即時觸發重算
             }
         });
     }
