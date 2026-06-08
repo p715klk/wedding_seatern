@@ -598,8 +598,11 @@ function getSeatLayout(maxSeats) {
     return { radius, guestSize };
 }
 
-function initMobileExperience() {
-    if (!isMobileViewport() || !isSidebarOpen) return;
+// 側邊欄開合
+let isSidebarOpen = true;
+
+function closeSidebar() {
+    if (!isSidebarOpen) return;
     const sidebar = document.getElementById('sidebar-panel');
     const icon = document.getElementById('sidebar-toggle-icon');
     sidebar.classList.add('collapsed');
@@ -607,19 +610,21 @@ function initMobileExperience() {
     isSidebarOpen = false;
 }
 
-// 側邊欄開合
-let isSidebarOpen = true;
+function initMobileExperience() {
+    if (!isMobileViewport()) return;
+    closeSidebar();
+}
+
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar-panel');
     const icon = document.getElementById('sidebar-toggle-icon');
     if (isSidebarOpen) {
-        sidebar.classList.add('collapsed');
-        icon.innerText = "▶";
+        closeSidebar();
     } else {
         sidebar.classList.remove('collapsed');
-        icon.innerText = "◀";
+        icon.innerText = '◀';
+        isSidebarOpen = true;
     }
-    isSidebarOpen = !isSidebarOpen;
 }
 
 let isDraggingTable = false;
@@ -718,7 +723,7 @@ function resolvePointerDrop(clientX, clientY, data) {
     }
 }
 
-function setupTouchDrag(el, getDragData) {
+function setupTouchDrag(el, getDragData, onDragStart) {
     let startX = 0, startY = 0, dragging = false, ghost = null, dragData = null;
     const threshold = 14;
 
@@ -741,6 +746,7 @@ function setupTouchDrag(el, getDragData) {
             isGuestDragging = true;
             dragData = getDragData();
             ghost = createDragGhost(dragData.name || '', t.clientX, t.clientY);
+            if (onDragStart) onDragStart(dragData);
         }
         if (dragging) {
             e.preventDefault();
@@ -917,13 +923,16 @@ function renderGroupData(groups, container) {
                     fromTable: 'POOL',
                     index: item.originalIndex,
                     name: item.data.name
-                }));
+                }), () => {
+                    if (isMobileViewport()) closeSidebar();
+                });
             } else {
                 chip.setAttribute('draggable', 'true');
                 chip.addEventListener('dragstart', (e) => {
                     e.stopPropagation();
                     cancelTableDrag();
                     isGuestDragging = true;
+                    if (isMobileViewport()) closeSidebar();
                     e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: "POOL", index: item.originalIndex, name: item.data.name }));
                 });
                 chip.addEventListener('dragend', () => {
