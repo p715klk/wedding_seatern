@@ -2,16 +2,19 @@
 <html lang="zh-Hant-HK">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>自製鷗鷗 - 視覺化高級排位畫布</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="admin_style.css">
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <style>
-        body {
+        html, body.seating-touch {
             user-select: none;
             -webkit-user-select: none;
+            touch-action: none;
+            overscroll-behavior: none;
+            -webkit-touch-callout: none;
         }
         .workspace-canvas {
             --zoom: 1;
@@ -61,7 +64,7 @@
             left: 50%;
             top: 50%;
             transform: translate(-50%, -50%);
-            z-index: 5;
+            z-index: 6;
             pointer-events: none;
             user-select: none;
             text-align: center;
@@ -73,12 +76,29 @@
             line-height: 1.15;
             max-width: calc(110px * var(--zoom));
         }
+        @media (hover: none) and (pointer: coarse) {
+            .hub-center {
+                pointer-events: auto;
+                cursor: pointer;
+                min-width: calc(88px * var(--zoom));
+                min-height: calc(56px * var(--zoom));
+                padding: calc(6px * var(--zoom));
+            }
+        }
         .hub-title {
             font-size: calc(18px * var(--zoom));
             font-weight: 800;
             color: #1f2937;
             white-space: nowrap;
             line-height: 1.1;
+            pointer-events: auto;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            padding: calc(4px * var(--zoom)) calc(8px * var(--zoom));
+            border-radius: calc(6px * var(--zoom));
+        }
+        .hub-title:active {
+            background: rgba(99, 102, 241, 0.08);
         }
         .hub-category {
             font-size: calc(10px * var(--zoom));
@@ -188,7 +208,11 @@
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        #canvas-viewport { touch-action: none; cursor: grab; }
+        #canvas-viewport, #main-canvas, .workspace-canvas {
+            touch-action: none;
+            -webkit-user-select: none;
+        }
+        #canvas-viewport { cursor: grab; }
         #canvas-viewport:active { cursor: grabbing; }
 
         .guest-drag-ghost {
@@ -219,7 +243,7 @@
         }
     </style>
 </head>
-<body class="bg-slate-900 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
+<body class="seating-touch bg-slate-900 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
 
     <header class="bg-white text-slate-800 h-14 px-4 shadow-sm flex justify-between items-center shrink-0 border-b border-slate-200 z-30">
         <div class="flex items-center gap-3">

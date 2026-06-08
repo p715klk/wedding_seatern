@@ -161,7 +161,33 @@ function getSidebarWidth() {
 }
 
 function bindGuestTap(element, onTap) {
+    const threshold = 14;
     let startX = 0, startY = 0, moved = false;
+
+    if (IS_TOUCH_DEVICE) {
+        element.addEventListener('touchstart', (e) => {
+            if (e.touches.length !== 1) return;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            moved = false;
+        }, { passive: true });
+
+        element.addEventListener('touchmove', (e) => {
+            if (e.touches.length !== 1) return;
+            if (Math.hypot(e.touches[0].clientX - startX, e.touches[0].clientY - startY) > threshold) {
+                moved = true;
+            }
+        }, { passive: true });
+
+        element.addEventListener('touchend', (e) => {
+            if (moved || isGuestDragging) return;
+            e.preventDefault();
+            e.stopPropagation();
+            onTap(e);
+        }, { passive: false });
+        return;
+    }
+
     element.addEventListener('pointerdown', (e) => {
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         startX = e.clientX;
@@ -169,7 +195,7 @@ function bindGuestTap(element, onTap) {
         moved = false;
     });
     element.addEventListener('pointermove', (e) => {
-        if (Math.hypot(e.clientX - startX, e.clientY - startY) > 8) moved = true;
+        if (Math.hypot(e.clientX - startX, e.clientY - startY) > threshold) moved = true;
     });
     element.addEventListener('pointerup', (e) => {
         if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -197,7 +223,9 @@ let isPanning = false;
 let panPointerId = null;
 let startX, startY;
 let lastPinchDist = 0;
-let pinchZoom = 1;
+let touchPanOrigin = null;
+let touchPanActive = false;
+let touchGestureActive = false;
 
 const viewport = document.getElementById('canvas-viewport');
 const canvas = document.getElementById('main-canvas');
@@ -272,76 +300,118 @@ viewport.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 function canStartCanvasPan(target) {
-    return !target.closest('.seat-slot, .table-plate, .pool-guest-chip, button, input, select, a, #sidebar-content');
+    return !target.closest(
+        '.seat-slot, .guest-seat-circle, .pool-guest-chip, .hub-center, .hub-title, button, input, select, a, #sidebar-content, #sidebar-panel, #sidebar-toggle-btn, .guest-drag-ghost'
+    );
 }
 
-viewport.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    if (!canStartCanvasPan(e.target)) return;
-
-    isPanning = true;
-    panPointerId = e.pointerId;
-    viewport.style.cursor = 'grabbing';
-    startX = e.clientX - panX;
-    startY = e.clientY - panY;
-    try { viewport.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-});
-
-viewport.addEventListener('pointermove', (e) => {
-    if (!isPanning || e.pointerId !== panPointerId) return;
-    panX = e.clientX - startX;
-    panY = e.clientY - startY;
-    applyTransform();
-});
-
-function endCanvasPan(e) {
-    if (panPointerId !== null && e && e.pointerId !== panPointerId) return;
+function resetTouchGestures() {
+    touchPanActive = false;
+    touchPanOrigin = null;
+    lastPinchDist = 0;
+    touchGestureActive = false;
     isPanning = false;
     panPointerId = null;
-    viewport.style.cursor = 'grab';
 }
 
-viewport.addEventListener('pointerup', endCanvasPan);
-viewport.addEventListener('pointercancel', endCanvasPan);
+if (!IS_TOUCH_DEVICE) {
+    viewport.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        if (!canStartCanvasPan(e.target)) return;
+
+        isPanning = true;
+        panPointerId = e.pointerId;
+        viewport.style.cursor = 'grabbing';
+        startX = e.clientX - panX;
+        startY = e.clientY - panY;
+        try { viewport.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    });
+
+    viewport.addEventListener('pointermove', (e) => {
+        if (!isPanning || e.pointerId !== panPointerId) return;
+        panX = e.clientX - startX;
+        panY = e.clientY - startY;
+        applyTransform();
+    });
+
+    function endCanvasPan(e) {
+        if (panPointerId !== null && e && e.pointerId !== panPointerId) return;
+        isPanning = false;
+        panPointerId = null;
+        viewport.style.cursor = 'grab';
+    }
+
+    viewport.addEventListener('pointerup', endCanvasPan);
+    viewport.addEventListener('pointercancel', endCanvasPan);
+}
 
 viewport.addEventListener('touchstart', (e) => {
     if (e.touches.length === 2) {
         e.preventDefault();
+        touchGestureActive = true;
+        touchPanActive = false;
+        touchPanOrigin = null;
         isPanning = false;
-        panPointerId = null;
         lastPinchDist = getTouchDistance(e.touches);
+        return;
+    }
+
+    if (e.touches.length === 1 && canStartCanvasPan(e.target)) {
+        touchGestureActive = true;
+        touchPanActive = true;
+        touchPanOrigin = {
+            x: e.touches[0].clientX,
+            y: e.touches[0].clientY,
+            panX,
+            panY
+        };
+    }
+}, { passive: false, capture: true });
+
+viewport.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2 && lastPinchDist > 0) {
+        e.preventDefault();
+        const dist = getTouchDistance(e.touches);
+        const scale = dist / lastPinchDist;
         const center = getTouchCenter(e.touches);
         const canvasX = (center.x - panX) / zoom;
         const canvasY = (center.y - panY) / zoom;
-        pinchZoom = zoom;
-        viewport._pinchCanvasX = canvasX;
-        viewport._pinchCanvasY = canvasY;
-        viewport._pinchCenterX = center.x;
-        viewport._pinchCenterY = center.y;
+        zoom = Math.min(2.5, Math.max(0.15, zoom * scale));
+        panX = center.x - canvasX * zoom;
+        panY = center.y - canvasY * zoom;
+        lastPinchDist = dist;
+        applyTransform();
+        return;
     }
-}, { passive: false });
 
-viewport.addEventListener('touchmove', (e) => {
-    if (e.touches.length !== 2 || !lastPinchDist) return;
-    e.preventDefault();
-    const dist = getTouchDistance(e.touches);
-    const scale = dist / lastPinchDist;
-    const center = getTouchCenter(e.touches);
-    const nextZoom = Math.min(2.5, Math.max(0.15, pinchZoom * scale));
-    const canvasX = viewport._pinchCanvasX;
-    const canvasY = viewport._pinchCanvasY;
-    zoom = nextZoom;
-    panX = center.x - canvasX * zoom;
-    panY = center.y - canvasY * zoom;
-    applyTransform();
-}, { passive: false });
+    if (e.touches.length === 1 && touchPanActive && touchPanOrigin) {
+        e.preventDefault();
+        panX = touchPanOrigin.panX + (e.touches[0].clientX - touchPanOrigin.x);
+        panY = touchPanOrigin.panY + (e.touches[0].clientY - touchPanOrigin.y);
+        applyTransform();
+    }
+}, { passive: false, capture: true });
 
 viewport.addEventListener('touchend', (e) => {
-    if (e.touches.length < 2) {
-        lastPinchDist = 0;
-        pinchZoom = zoom;
+    if (e.touches.length === 0) {
+        resetTouchGestures();
+        return;
     }
-});
+    if (e.touches.length === 1) {
+        lastPinchDist = 0;
+        if (canStartCanvasPan(e.target)) {
+            touchPanActive = true;
+            touchPanOrigin = {
+                x: e.touches[0].clientX,
+                y: e.touches[0].clientY,
+                panX,
+                panY
+            };
+        }
+    }
+}, { capture: true });
+
+viewport.addEventListener('touchcancel', resetTouchGestures, { capture: true });
 
 viewport.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -648,41 +718,42 @@ function resolvePointerDrop(clientX, clientY, data) {
     }
 }
 
-function setupGuestPointerDrag(seatSlot, guest, tableNum, seatIndex) {
+function setupTouchDrag(el, getDragData) {
     let startX = 0, startY = 0, dragging = false, ghost = null, dragData = null;
-    const threshold = IS_TOUCH_DEVICE ? 8 : 12;
+    const threshold = 14;
 
-    seatSlot.addEventListener('pointerdown', (e) => {
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
-        startX = e.clientX;
-        startY = e.clientY;
-        dragging = false;
+    el.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
         e.stopPropagation();
+        resetTouchGestures();
         cancelTableDrag();
-        try { seatSlot.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-    });
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        dragging = false;
+    }, { passive: true });
 
-    seatSlot.addEventListener('pointermove', (e) => {
-        if (!seatSlot.hasPointerCapture(e.pointerId)) return;
-        const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
+    el.addEventListener('touchmove', (e) => {
+        if (e.touches.length !== 1) return;
+        const t = e.touches[0];
+        const dist = Math.hypot(t.clientX - startX, t.clientY - startY);
         if (!dragging && dist > threshold) {
             dragging = true;
             isGuestDragging = true;
-            dragData = { fromTable: tableNum, seatIndex, name: guest.name };
-            ghost = createDragGhost(guest.name, e.clientX, e.clientY);
+            dragData = getDragData();
+            ghost = createDragGhost(dragData.name || '', t.clientX, t.clientY);
         }
-        if (dragging && ghost) {
-            ghost.style.left = `${e.clientX}px`;
-            ghost.style.top = `${e.clientY}px`;
+        if (dragging) {
+            e.preventDefault();
+            ghost.style.left = `${t.clientX}px`;
+            ghost.style.top = `${t.clientY}px`;
         }
-    });
+    }, { passive: false });
 
     const endDrag = (e) => {
-        if (!seatSlot.hasPointerCapture(e.pointerId)) return;
-        try { seatSlot.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
         if (dragging && dragData) {
+            const t = e.changedTouches[0];
             if (ghost) ghost.style.visibility = 'hidden';
-            resolvePointerDrop(e.clientX, e.clientY, dragData);
+            resolvePointerDrop(t.clientX, t.clientY, dragData);
         }
         if (ghost) ghost.remove();
         dragging = false;
@@ -692,55 +763,8 @@ function setupGuestPointerDrag(seatSlot, guest, tableNum, seatIndex) {
         cancelTableDrag();
     };
 
-    seatSlot.addEventListener('pointerup', endDrag);
-    seatSlot.addEventListener('pointercancel', endDrag);
-}
-
-function setupPoolPointerDrag(chip, guest, poolIndex) {
-    let startX = 0, startY = 0, dragging = false, ghost = null, dragData = null;
-
-    chip.addEventListener('pointerdown', (e) => {
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
-        startX = e.clientX;
-        startY = e.clientY;
-        dragging = false;
-        e.stopPropagation();
-        cancelTableDrag();
-        try { chip.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-    });
-
-    chip.addEventListener('pointermove', (e) => {
-        if (!chip.hasPointerCapture(e.pointerId)) return;
-        const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
-        if (!dragging && dist > 8) {
-            dragging = true;
-            isGuestDragging = true;
-            dragData = { fromTable: 'POOL', index: poolIndex, name: guest.name };
-            ghost = createDragGhost(guest.name, e.clientX, e.clientY);
-        }
-        if (dragging && ghost) {
-            ghost.style.left = `${e.clientX}px`;
-            ghost.style.top = `${e.clientY}px`;
-        }
-    });
-
-    const endDrag = (e) => {
-        if (!chip.hasPointerCapture(e.pointerId)) return;
-        try { chip.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-        if (dragging && dragData) {
-            if (ghost) ghost.style.visibility = 'hidden';
-            resolvePointerDrop(e.clientX, e.clientY, dragData);
-        }
-        if (ghost) ghost.remove();
-        dragging = false;
-        ghost = null;
-        dragData = null;
-        isGuestDragging = false;
-        cancelTableDrag();
-    };
-
-    chip.addEventListener('pointerup', endDrag);
-    chip.addEventListener('pointercancel', endDrag);
+    el.addEventListener('touchend', endDrag, { passive: true });
+    el.addEventListener('touchcancel', endDrag, { passive: true });
 }
 
 function cancelTableDrag() {
@@ -889,7 +913,11 @@ function renderGroupData(groups, container) {
             chip.className = `pool-guest-chip text-sm p-2.5 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-grab active:cursor-grabbing ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
             chip.innerText = item.data.name;
             if (IS_TOUCH_DEVICE) {
-                setupPoolPointerDrag(chip, item.data, item.originalIndex);
+                setupTouchDrag(chip, () => ({
+                    fromTable: 'POOL',
+                    index: item.originalIndex,
+                    name: item.data.name
+                }));
             } else {
                 chip.setAttribute('draggable', 'true');
                 chip.addEventListener('dragstart', (e) => {
@@ -959,12 +987,14 @@ function renderCanvasTables() {
 
         const tablePlate = document.createElement('div');
         tablePlate.className = 'table-plate';
-        tablePlate.addEventListener('pointerdown', startTableDrag);
-        tablePlate.ondblclick = (e) => {
-            e.stopPropagation();
-            cancelTableDrag();
-            openSettingsModal(tableNum, maxSeats);
-        };
+        if (!IS_TOUCH_DEVICE) {
+            tablePlate.addEventListener('pointerdown', startTableDrag);
+            tablePlate.ondblclick = (e) => {
+                e.stopPropagation();
+                cancelTableDrag();
+                openSettingsModal(tableNum, maxSeats);
+            };
+        }
 
         const seatLayout = getSeatLayout(maxSeats);
         tablePlate.style.setProperty('--guest-size', `${seatLayout.guestSize}px`);
@@ -992,7 +1022,11 @@ function renderCanvasTables() {
                 });
 
                 if (IS_TOUCH_DEVICE) {
-                    setupGuestPointerDrag(seatSlot, guest, tableNum, i);
+                    setupTouchDrag(seatSlot, () => ({
+                        fromTable: tableNum,
+                        seatIndex: i,
+                        name: guest.name
+                    }));
                 } else {
                     seatSlot.setAttribute('draggable', 'true');
                     seatSlot.addEventListener('pointerdown', (e) => {
@@ -1033,6 +1067,14 @@ function renderCanvasTables() {
             tableLabel ? `<span class="hub-category">${escapeHtml(tableLabel)}</span>` : '',
             `<span class="hub-num">${filled}</span>`
         ].join('');
+        if (IS_TOUCH_DEVICE) {
+            bindGuestTap(hubCenter, () => openSettingsModal(tableNum, maxSeats));
+        } else {
+            const hubTitle = hubCenter.querySelector('.hub-title');
+            if (hubTitle) {
+                bindGuestTap(hubTitle, () => openSettingsModal(tableNum, maxSeats));
+            }
+        }
         tablePlate.appendChild(hubCenter);
 
         tableWrapper.appendChild(tablePlate);
