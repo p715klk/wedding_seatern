@@ -512,3 +512,5 @@ function deleteTableAction() {
         ]).then(() => { closeSettingsModal(); });
     }
 }
+if (rawArrived === true || rawArrived === '已到') currentArrivedStatus = '停到'; // 修正變量語意
+if (rawArrived === true || rawArrived === '已到') currentArrivedStatus = '已到';
