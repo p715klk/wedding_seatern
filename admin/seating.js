@@ -178,12 +178,13 @@ function setPrimaryGroupTag(guest, newPrimary) {
 // ==========================================
 const CANVAS_W = 5000;
 const CANVAS_H = 4000;
-const TABLE_DIM = 440;
+const TABLE_DIM = 380;
 const TABLE_CENTER = TABLE_DIM / 2;
-const SEAT_RADIUS = 158;
+const SEAT_RADIUS = 138;
+const GRID_SIZE = 20;
 
-let zoom = 0.8; 
-let panX = -900;  
+let zoom = 1.0;
+let panX = -900;
 let panY = -600;
 let isPanning = false;
 let startX, startY;
@@ -191,34 +192,59 @@ let startX, startY;
 const viewport = document.getElementById('canvas-viewport');
 const canvas = document.getElementById('main-canvas');
 
+function snapToGrid(value) {
+    return Math.round(value / GRID_SIZE) * GRID_SIZE;
+}
+
+function screenToCanvas(screenX, screenY) {
+    const rect = viewport.getBoundingClientRect();
+    return {
+        x: (screenX - rect.left - panX) / zoom,
+        y: (screenY - rect.top - panY) / zoom
+    };
+}
+
 function applyTransform() {
-    canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    canvas.style.transform = `translate(${panX}px, ${panY}px)`;
+    canvas.style.setProperty('--zoom', zoom);
     document.getElementById('zoom-percent').innerText = `${Math.round(zoom * 100)}%`;
+    updateAllTablePositions();
+}
+
+function updateAllTablePositions() {
+    document.querySelectorAll('.draggable-table').forEach(el => {
+        const bx = parseFloat(el.dataset.baseX || 0);
+        const by = parseFloat(el.dataset.baseY || 0);
+        el.style.left = `${bx * zoom}px`;
+        el.style.top = `${by * zoom}px`;
+    });
 }
 
 viewport.addEventListener('wheel', (e) => {
     e.preventDefault();
     const zoomFactor = 1.08;
     let nextZoom = e.deltaY < 0 ? zoom * zoomFactor : zoom / zoomFactor;
-    nextZoom = Math.min(2.0, Math.max(0.25, nextZoom));
+    nextZoom = Math.min(2.5, Math.max(0.35, nextZoom));
 
     const rect = viewport.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
+    const canvasX = (mouseX - panX) / zoom;
+    const canvasY = (mouseY - panY) / zoom;
 
-    panX = mouseX - (mouseX - panX) * (nextZoom / zoom);
-    panY = mouseY - (mouseY - panY) * (nextZoom / zoom);
     zoom = nextZoom;
+    panX = mouseX - canvasX * zoom;
+    panY = mouseY - canvasY * zoom;
     applyTransform();
 }, { passive: false });
 
 viewport.addEventListener('mousedown', (e) => {
     const isSeat = e.target.closest('.seat-slot');
-    const isCenterCircle = e.target.closest('.w-40.h-40'); 
+    const isTableCore = e.target.closest('.table-core');
     const isInteractive = e.target.closest('button, input, select');
 
-    if (isSeat || isCenterCircle || isInteractive) {
-        return; 
+    if (isSeat || isTableCore || isInteractive) {
+        return;
     }
 
     isPanning = true;
@@ -241,7 +267,15 @@ window.addEventListener('mouseup', () => {
 viewport.addEventListener('contextmenu', e => e.preventDefault());
 
 function zoomCanvas(factor) {
-    zoom = Math.min(2.0, Math.max(0.25, zoom * factor));
+    const rect = viewport.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const canvasX = (centerX - panX) / zoom;
+    const canvasY = (centerY - panY) / zoom;
+
+    zoom = Math.min(2.5, Math.max(0.35, zoom * factor));
+    panX = centerX - canvasX * zoom;
+    panY = centerY - canvasY * zoom;
     applyTransform();
 }
 
@@ -259,6 +293,24 @@ function getTablesBoundingBox() {
     return { minX, minY, maxX, maxY, centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2 };
 }
 
+function snapAllTablesToGrid() {
+    const updates = {};
+    let changed = false;
+    Object.keys(tableSettings).forEach(num => {
+        const nx = snapToGrid(tableSettings[num].x);
+        const ny = snapToGrid(tableSettings[num].y);
+        if (nx !== tableSettings[num].x || ny !== tableSettings[num].y) {
+            tableSettings[num].x = nx;
+            tableSettings[num].y = ny;
+            updates[`table_settings/${num}/x`] = nx;
+            updates[`table_settings/${num}/y`] = ny;
+            changed = true;
+        }
+    });
+    if (!changed) return Promise.resolve(false);
+    return database.ref().update(updates).then(() => true);
+}
+
 function centerAllTablesOnCanvas() {
     const bounds = getTablesBoundingBox();
     if (!bounds) return Promise.resolve(false);
@@ -269,8 +321,8 @@ function centerAllTablesOnCanvas() {
 
     const updates = {};
     Object.keys(tableSettings).forEach(num => {
-        tableSettings[num].x = Math.round(tableSettings[num].x + dx);
-        tableSettings[num].y = Math.round(tableSettings[num].y + dy);
+        tableSettings[num].x = snapToGrid(Math.round(tableSettings[num].x + dx));
+        tableSettings[num].y = snapToGrid(Math.round(tableSettings[num].y + dy));
         updates[`table_settings/${num}/x`] = tableSettings[num].x;
         updates[`table_settings/${num}/y`] = tableSettings[num].y;
     });
@@ -291,11 +343,34 @@ function fitViewToTables() {
 
     const zoomX = vpW / (groupW + padding * 2);
     const zoomY = vpH / (groupH + padding * 2);
-    zoom = Math.min(1.1, Math.max(0.3, Math.min(zoomX, zoomY)));
+    zoom = Math.min(1.2, Math.max(0.4, Math.min(zoomX, zoomY)));
 
     panX = sidebarWidth + (vpW / 2) - bounds.centerX * zoom;
     panY = (vpH / 2) - bounds.centerY * zoom;
     applyTransform();
+}
+
+function getOccupancyColor(filled, maxSeats) {
+    const ratio = filled / maxSeats;
+    if (ratio > 1) return '#ef4444';
+    if (ratio >= 1) return '#f59e0b';
+    if (ratio >= 0.75) return '#eab308';
+    return '#22c55e';
+}
+
+function buildOccRingSVG(filled, maxSeats) {
+    const r = 54;
+    const circumference = 2 * Math.PI * r;
+    const ratio = Math.min(filled / maxSeats, 1);
+    const dash = circumference * ratio;
+    const color = getOccupancyColor(filled, maxSeats);
+    const size = 120;
+    return `<svg class="occ-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="width:calc(${size}px * var(--zoom));height:calc(${size}px * var(--zoom))">
+        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#e2e8f0" stroke-width="6"/>
+        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="6"
+            stroke-dasharray="${dash} ${circumference}" stroke-linecap="round"
+            transform="rotate(-90 ${size/2} ${size/2})"/>
+    </svg>`;
 }
 
 // 側邊欄開合
@@ -331,14 +406,14 @@ database.ref().on('value', (snapshot) => {
         if (!tableSettings[i]) {
             const row = Math.floor((i - 1) / 4);
             const col = (i - 1) % 4;
-            const gridW = 3 * 480 + TABLE_DIM;
-            const gridH = 3 * 480 + TABLE_DIM;
-            const startX = CANVAS_W / 2 - gridW / 2;
-            const startY = CANVAS_H / 2 - gridH / 2;
+            const gridW = 3 * 400 + TABLE_DIM;
+            const gridH = 3 * 400 + TABLE_DIM;
+            const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
+            const startY = snapToGrid(CANVAS_H / 2 - gridH / 2);
             tableSettings[i] = {
                 max_seats: 12,
-                x: Math.round(startX + col * 480),
-                y: Math.round(startY + row * 480)
+                x: snapToGrid(startX + col * 400),
+                y: snapToGrid(startY + row * 400)
             };
             updatedSettings = true;
         }
@@ -355,21 +430,18 @@ database.ref().on('value', (snapshot) => {
         applyTransform();
     };
 
-    if (!localStorage.getItem('seating_tables_centered_v2')) {
-        centerAllTablesOnCanvas().then((moved) => {
-            localStorage.setItem('seating_tables_centered_v2', '1');
-            if (!moved) {
-                runRender();
-                fitViewToTables();
-            }
+    if (!localStorage.getItem('seating_grid_snap_v1')) {
+        snapAllTablesToGrid().then((moved) => {
+            localStorage.setItem('seating_grid_snap_v1', '1');
+            if (!moved) runRender();
         });
         return;
     }
 
     runRender();
-    if (!localStorage.getItem('seating_view_fitted_v2')) {
+    if (!localStorage.getItem('seating_view_fitted_v3')) {
         fitViewToTables();
-        localStorage.setItem('seating_view_fitted_v2', '1');
+        localStorage.setItem('seating_view_fitted_v3', '1');
     }
 });
 
@@ -486,7 +558,8 @@ function renderCanvasTables() {
         const settings = tableSettings[tableNum];
         const maxSeats = settings.max_seats || 12;
         const guestsInTable = allGuests[idx] || [];
-        
+        const filled = guestsInTable.filter(g => g && g.name).length;
+
         const seatSlotsArray = new Array(maxSeats).fill(null);
         guestsInTable.forEach(g => {
             if (g && g.name && g.sort >= 1 && g.sort <= maxSeats) {
@@ -495,46 +568,45 @@ function renderCanvasTables() {
         });
 
         const tableWrapper = document.createElement('div');
-        tableWrapper.className = "draggable-table flex items-center justify-center";
-        tableWrapper.style.width = `${TABLE_DIM}px`;
-        tableWrapper.style.height = `${TABLE_DIM}px`;
-        tableWrapper.style.left = `${settings.x}px`;
-        tableWrapper.style.top = `${settings.y}px`;
+        tableWrapper.className = "draggable-table";
+        tableWrapper.dataset.baseX = settings.x;
+        tableWrapper.dataset.baseY = settings.y;
+        tableWrapper.style.left = `${settings.x * zoom}px`;
+        tableWrapper.style.top = `${settings.y * zoom}px`;
         tableWrapper.setAttribute('data-table', tableNum);
 
-        const seatRing = document.createElement('div');
-        seatRing.className = 'seat-ring';
-        const ringSize = SEAT_RADIUS * 2;
-        seatRing.style.left = `${TABLE_CENTER - SEAT_RADIUS}px`;
-        seatRing.style.top = `${TABLE_CENTER - SEAT_RADIUS}px`;
-        seatRing.style.width = `${ringSize}px`;
-        seatRing.style.height = `${ringSize}px`;
-        tableWrapper.appendChild(seatRing);
+        const tableLabel = document.createElement('div');
+        tableLabel.className = 'table-label';
+        tableLabel.innerText = `第 ${tableNum} 桌`;
+        tableWrapper.appendChild(tableLabel);
 
-        const innerCircle = document.createElement('div');
-        innerCircle.className = "w-40 h-40 rounded-full bg-white border-2 border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.06)] flex flex-col items-center justify-center relative z-10 select-none cursor-grab";
-        innerCircle.innerHTML = `
-            <div class="text-[11px] uppercase font-bold tracking-widest text-slate-400">TABLE</div>
-            <div class="text-3xl font-black text-slate-800 my-0.5">${tableNum}</div>
-            <div class="text-xs bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full font-bold">
-                ${guestsInTable.filter(g=>g&&g.name).length} / ${maxSeats}人
-            </div>
-            <button class="text-xs text-indigo-500 hover:text-indigo-700 font-semibold mt-1.5 transition">⚙️設定</button>
+        const tableBody = document.createElement('div');
+        tableBody.className = 'table-body';
+
+        tableBody.insertAdjacentHTML('beforeend', buildOccRingSVG(filled, maxSeats));
+
+        const tableCore = document.createElement('div');
+        tableCore.className = 'table-core';
+        tableCore.innerHTML = `
+            <div class="table-core-num">${filled}</div>
+            <div class="table-core-count">${filled} / ${maxSeats}</div>
+            <button type="button" class="table-core-settings">⚙️ 設定</button>
         `;
-        
-        innerCircle.querySelector('button').onclick = (e) => {
+
+        tableCore.querySelector('button').onclick = (e) => {
             e.stopPropagation();
             openSettingsModal(tableNum, maxSeats);
         };
 
-        innerCircle.onmousedown = (e) => {
+        tableCore.onmousedown = (e) => {
             if (e.target.tagName === 'BUTTON') return;
             e.stopPropagation();
             isDraggingTable = true;
             draggedTableElement = tableWrapper;
-            tableOffsetX = (e.clientX / zoom) - tableWrapper.offsetLeft;
-            tableOffsetY = (e.clientY / zoom) - tableWrapper.offsetTop;
-            tableWrapper.style.zIndex = 1000;
+            const pos = screenToCanvas(e.clientX, e.clientY);
+            tableOffsetX = pos.x - parseFloat(tableWrapper.dataset.baseX);
+            tableOffsetY = pos.y - parseFloat(tableWrapper.dataset.baseY);
+            tableWrapper.classList.add('is-dragging');
         };
 
         for (let i = 0; i < maxSeats; i++) {
@@ -543,14 +615,14 @@ function renderCanvasTables() {
             const x = TABLE_CENTER + SEAT_RADIUS * Math.cos(angle);
             const y = TABLE_CENTER + SEAT_RADIUS * Math.sin(angle);
 
-            seatSlot.style.left = `${x}px`;
-            seatSlot.style.top = `${y}px`;
-            
+            seatSlot.style.left = `calc(${x}px * var(--zoom))`;
+            seatSlot.style.top = `calc(${y}px * var(--zoom))`;
+
             const guest = seatSlotsArray[i];
 
             if (guest) {
                 const sideClass = guest.side === '女方' ? 'side-female' : 'side-male';
-                seatSlot.className = `seat-slot guest-seat-label ${sideClass}`;
+                seatSlot.className = `seat-slot guest-seat-circle ${sideClass}`;
                 seatSlot.innerHTML = `<span class="text-ellipsis" title="${guest.name}">${guest.name}</span>`;
                 seatSlot.setAttribute('draggable', 'true');
 
@@ -570,32 +642,37 @@ function renderCanvasTables() {
             seatSlot.setAttribute('ondragover', 'allowDrop(event)');
             seatSlot.setAttribute('ondrop', `handleDropOnSpecificSeat(event, "${tableNum}", ${i})`);
 
-            tableWrapper.appendChild(seatSlot);
+            tableBody.appendChild(seatSlot);
         }
 
-        tableWrapper.appendChild(innerCircle);
+        tableBody.appendChild(tableCore);
+        tableWrapper.appendChild(tableBody);
         canvas.appendChild(tableWrapper);
     });
 }
 
 document.addEventListener('mousemove', (e) => {
     if (!isDraggingTable || !draggedTableElement) return;
-    let x = (e.clientX / zoom) - tableOffsetX;
-    let y = (e.clientY / zoom) - tableOffsetY;
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    draggedTableElement.style.left = `${x}px`;
-    draggedTableElement.style.top = `${y}px`;
+    const pos = screenToCanvas(e.clientX, e.clientY);
+    let bx = snapToGrid(pos.x - tableOffsetX);
+    let by = snapToGrid(pos.y - tableOffsetY);
+    if (bx < 0) bx = 0;
+    if (by < 0) by = 0;
+    draggedTableElement.dataset.baseX = bx;
+    draggedTableElement.dataset.baseY = by;
+    draggedTableElement.style.left = `${bx * zoom}px`;
+    draggedTableElement.style.top = `${by * zoom}px`;
 });
 
 document.addEventListener('mouseup', () => {
     if (isDraggingTable && draggedTableElement) {
         const tableNum = draggedTableElement.getAttribute('data-table');
-        database.ref(`table_settings/${tableNum}`).update({
-            x: parseInt(draggedTableElement.style.left),
-            y: parseInt(draggedTableElement.style.top)
-        });
-        draggedTableElement.style.zIndex = "";
+        const bx = parseInt(draggedTableElement.dataset.baseX, 10);
+        const by = parseInt(draggedTableElement.dataset.baseY, 10);
+        tableSettings[tableNum].x = bx;
+        tableSettings[tableNum].y = by;
+        database.ref(`table_settings/${tableNum}`).update({ x: bx, y: by });
+        draggedTableElement.classList.remove('is-dragging');
     }
     isDraggingTable = false;
     draggedTableElement = null;
@@ -786,10 +863,14 @@ function createNewTableAction() {
     const maxSeats = prompt(`請輸入第 ${cleanNum} 桌的人數上限：`, "12");
     const cleanMax = parseInt(maxSeats) || 12;
 
+    const center = screenToCanvas(
+        viewport.getBoundingClientRect().left + viewport.getBoundingClientRect().width / 2,
+        viewport.getBoundingClientRect().top + viewport.getBoundingClientRect().height / 2
+    );
     database.ref(`table_settings/${cleanNum}`).set({
         max_seats: cleanMax,
-        x: Math.abs(panX) + 300,
-        y: Math.abs(panY) + 200
+        x: snapToGrid(center.x - TABLE_DIM / 2),
+        y: snapToGrid(center.y - TABLE_DIM / 2)
     });
 }
 

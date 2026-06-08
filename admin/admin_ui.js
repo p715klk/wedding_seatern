@@ -162,7 +162,7 @@ function renderThead() {
     let html = '';
     html += thCell('排序', colWidthByText('排序', { min: 34, max: 42, pad: 16 }), { className: 'text-[11px] font-bold text-gray-500' });
     html += thCell('拖拉', colWidthByText('拖拉', { min: 34, max: 42, pad: 16 }), { className: 'text-[11px] font-bold text-gray-500' });
-    html += thCell('分配桌次', colWidthByText('分配桌次', { min: 68, max: 80 }));
+    html += thCell('次', colWidthByText('分配桌次', { min: 40, max: 60 }));
     html += thCell('桌次座位', colWidthByText('第 99 桌 - 第 99 位', { min: 88, max: 100 }), { align: 'left' });
     html += thCell('賓客姓名', colWidthByText('賓客姓名', { min: 128, max: 150 }), { align: 'left' });
     html += thCell('來源分類', colWidthByText('來源分類', { min: 72, max: 84 }));
