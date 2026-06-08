@@ -178,11 +178,10 @@ function setPrimaryGroupTag(guest, newPrimary) {
 // ==========================================
 const CANVAS_W = 5000;
 const CANVAS_H = 4000;
-const PLATE_SIZE = 260;
+const PLATE_SIZE = 420;
 const PLATE_CENTER = PLATE_SIZE / 2;
 const TABLE_DIM = PLATE_SIZE;
-const TABLE_LABEL_H = 20;
-const TABLE_TOTAL_H = PLATE_SIZE + TABLE_LABEL_H;
+const TABLE_TOTAL_H = PLATE_SIZE;
 const GRID_SIZE = 20;
 
 let zoom = 1.0;
@@ -242,7 +241,7 @@ viewport.addEventListener('wheel', (e) => {
 
 viewport.addEventListener('mousedown', (e) => {
     const isSeat = e.target.closest('.seat-slot');
-    const isTableCore = e.target.closest('.table-plate, .table-label');
+    const isTableCore = e.target.closest('.table-plate');
     const isInteractive = e.target.closest('button, input, select');
 
     if (isSeat || isTableCore || isInteractive) {
@@ -361,12 +360,12 @@ function getOccupancyColor(filled, maxSeats) {
 }
 
 function buildHubRingSVG(filled, maxSeats) {
-    const r = 36;
+    const r = 40;
     const circumference = 2 * Math.PI * r;
     const ratio = Math.min(filled / maxSeats, 1);
     const dash = circumference * ratio;
     const color = getOccupancyColor(filled, maxSeats);
-    const size = 92;
+    const size = 100;
     const cx = size / 2;
     return `<svg class="hub-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="width:calc(${size}px * var(--zoom));height:calc(${size}px * var(--zoom))">
         <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#f3f4f6" stroke-width="5"/>
@@ -378,23 +377,26 @@ function buildHubRingSVG(filled, maxSeats) {
 
 function getSeatLayout(maxSeats) {
     const plateR = PLATE_SIZE / 2;
-    const hubClearR = 44;
-    const guestSize = maxSeats > 14 ? 32 : 36;
+    const hubClearR = 52;
+    let guestSize = 64;
+    if (maxSeats > 12) guestSize = 58;
+    if (maxSeats > 14) guestSize = 54;
     const guestHalf = guestSize / 2;
-    const maxRadius = plateR - 8 - guestHalf;
-    const minRadius = hubClearR + guestHalf;
-    let radius = 86;
-    if (maxSeats > 10) radius = 82;
-    if (maxSeats > 14) radius = 78;
+    const edgeMargin = 16;
+    const maxRadius = plateR - edgeMargin - guestHalf;
+    const minRadius = hubClearR + guestHalf + 4;
+    const minChord = guestSize * 0.98;
+
+    let radius = maxRadius;
+    for (let r = maxRadius; r >= minRadius; r -= 1) {
+        const chord = 2 * r * Math.sin(Math.PI / maxSeats);
+        if (chord >= minChord) {
+            radius = r;
+            break;
+        }
+    }
     radius = Math.max(minRadius, Math.min(maxRadius, radius));
     return { radius, guestSize };
-}
-
-function shortenGuestName(name, maxLen = 3) {
-    if (!name) return '';
-    const trimmed = name.trim();
-    if (trimmed.length <= maxLen) return trimmed;
-    return trimmed.slice(0, maxLen);
 }
 
 // 側邊欄開合
@@ -430,8 +432,8 @@ database.ref().on('value', (snapshot) => {
         if (!tableSettings[i]) {
             const row = Math.floor((i - 1) / 4);
             const col = (i - 1) % 4;
-            const colGap = 280;
-            const rowGap = 300;
+            const colGap = 440;
+            const rowGap = 460;
             const gridW = 3 * colGap + TABLE_DIM;
             const gridH = 3 * rowGap + TABLE_TOTAL_H;
             const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
@@ -601,11 +603,6 @@ function renderCanvasTables() {
         tableWrapper.style.top = `${settings.y * zoom}px`;
         tableWrapper.setAttribute('data-table', tableNum);
 
-        const tableLabel = document.createElement('div');
-        tableLabel.className = 'table-label';
-        tableLabel.innerText = `第${tableNum}桌`;
-        tableWrapper.appendChild(tableLabel);
-
         const startTableDrag = (e) => {
             e.stopPropagation();
             isDraggingTable = true;
@@ -614,11 +611,6 @@ function renderCanvasTables() {
             tableOffsetX = pos.x - parseFloat(tableWrapper.dataset.baseX);
             tableOffsetY = pos.y - parseFloat(tableWrapper.dataset.baseY);
             tableWrapper.classList.add('is-dragging');
-        };
-        tableLabel.onmousedown = startTableDrag;
-        tableLabel.ondblclick = (e) => {
-            e.stopPropagation();
-            openSettingsModal(tableNum, maxSeats);
         };
 
         const tablePlate = document.createElement('div');
@@ -646,8 +638,7 @@ function renderCanvasTables() {
             if (guest) {
                 const sideClass = guest.side === '女方' ? 'side-female' : 'side-male';
                 seatSlot.className = `seat-slot guest-seat-circle ${sideClass}`;
-                const displayName = shortenGuestName(guest.name);
-                seatSlot.innerHTML = `<span class="text-ellipsis" title="${guest.name}">${displayName}</span>`;
+                seatSlot.innerHTML = `<span class="guest-name-text" title="${guest.name}">${guest.name}</span>`;
                 seatSlot.setAttribute('draggable', 'true');
 
                 bindGuestTap(seatSlot, () => {
@@ -671,10 +662,10 @@ function renderCanvasTables() {
 
         tablePlate.insertAdjacentHTML('beforeend', buildHubRingSVG(filled, maxSeats));
 
-        const hubNum = document.createElement('span');
-        hubNum.className = 'hub-num';
-        hubNum.innerText = filled;
-        tablePlate.appendChild(hubNum);
+        const hubCenter = document.createElement('div');
+        hubCenter.className = 'hub-center';
+        hubCenter.innerHTML = `<span class="hub-title">Table ${tableNum}</span><span class="hub-num">${filled}</span>`;
+        tablePlate.appendChild(hubCenter);
 
         tableWrapper.appendChild(tablePlate);
         canvas.appendChild(tableWrapper);
