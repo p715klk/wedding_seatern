@@ -1230,7 +1230,18 @@ function findGuestBySeat(tableIdx, seatIndex) {
     return guests.findIndex(g => g && g.sort === seatIndex + 1);
 }
 
+function sortGuestArraysBySeat() {
+    if (!allGuests) return;
+    const tableLists = Array.isArray(allGuests) ? allGuests : Object.values(allGuests);
+    tableLists.forEach(list => {
+        if (Array.isArray(list)) {
+            list.sort((a, b) => (parseInt(a?.sort, 10) || 99) - (parseInt(b?.sort, 10) || 99));
+        }
+    });
+}
+
 function persistGuestState() {
+    sortGuestArraysBySeat();
     return database.ref().update({
         wedding_guests: allGuests,
         unassigned_guests: unassignedPool

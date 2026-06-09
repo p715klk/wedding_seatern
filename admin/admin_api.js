@@ -37,11 +37,23 @@ function loadFirebaseData() {
     });
 }
 
+function sortGuestsListByTableAndSeat(list) {
+    list.sort((a, b) => {
+        const tableA = (a.table === '' || a.table == null || isNaN(a.table)) ? 9999 : parseInt(a.table, 10);
+        const tableB = (b.table === '' || b.table == null || isNaN(b.table)) ? 9999 : parseInt(b.table, 10);
+        if (tableA !== tableB) return tableA - tableB;
+        const seatA = parseInt(a.sort, 10);
+        const seatB = parseInt(b.sort, 10);
+        return (isNaN(seatA) ? 99 : seatA) - (isNaN(seatB) ? 99 : seatB);
+    });
+    return list;
+}
+
 function processFirebaseData(weddingGuests, unassignedGuests) {
     localGuestsList = [];
 
     // 已分配桌次賓客
-    Object.keys(weddingGuests).forEach(tableNum => {
+    Object.keys(weddingGuests).sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach(tableNum => {
         const list = weddingGuests[tableNum];
         if (Array.isArray(list)) {
             list.forEach(guest => {
@@ -74,6 +86,8 @@ function processFirebaseData(weddingGuests, unassignedGuests) {
             }
         });
     }
+
+    sortGuestsListByTableAndSeat(localGuestsList);
 
     renderThead();   // 呼叫 UI 模組生成表頭
     renderDOMRows(); // 呼叫 UI 模組渲染行數
@@ -187,7 +201,7 @@ function importCSVAction() {
                 }
             }
         }
-        localGuestsList = importedGuests;
+        localGuestsList = sortGuestsListByTableAndSeat(importedGuests);
         renderDOMRows();
         recalculateSortNumbersFromDOM();
     };
