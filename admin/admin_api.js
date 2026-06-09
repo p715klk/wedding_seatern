@@ -22,11 +22,13 @@ function loadFirebaseData() {
 
         return Promise.all([
             database.ref('wedding_guests').once('value'),
-            database.ref('unassigned_guests').once('value')
+            database.ref('unassigned_guests').once('value'),
+            database.ref('table_settings').once('value')
         ]);
-    }).then(([snapshot1, snapshot2]) => {
+    }).then(([snapshot1, snapshot2, snapshot3]) => {
         const weddingGuests = snapshot1.val() || {};
         const unassignedGuests = snapshot2.val() || [];
+        tableSettingsCache = snapshot3.val() || {};
 
         if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
             processFirebaseData(weddingGuests, unassignedGuests);
@@ -113,7 +115,9 @@ function saveAllToFirebase() {
 
         const gName = nameInput.value.trim();
         const gSide = row.querySelector('.row-side-select').value;
-        const gTableRaw = row.querySelector('.row-table-input').value.trim(); 
+        const gTableRaw = row.querySelector('.row-table-input').value.trim();
+        const seatInput = row.querySelector('.row-seat-input');
+        const gSeatRaw = seatInput ? seatInput.value.trim() : '';
 
         if (!gName) return; 
 
@@ -127,7 +131,9 @@ function saveAllToFirebase() {
         } else {
             const targetTable = parseInt(gTableRaw);
             if (!newWeddingGuests[targetTable]) newWeddingGuests[targetTable] = [];
-            guestData.sort = newWeddingGuests[targetTable].length + 1;
+            let seatNum = parseInt(gSeatRaw, 10);
+            if (isNaN(seatNum) || seatNum < 1) seatNum = 1;
+            guestData.sort = Math.min(ABSOLUTE_MAX_SEATS_PER_TABLE, seatNum);
             newWeddingGuests[targetTable].push(guestData);
         }
     });

@@ -55,11 +55,13 @@
     background: #ef4444;
 }
 
-/* 桌號輸入：數字置中，上下箭頭獨立在右側 */
-.row-table-cell {
+/* 桌號／座位輸入：數字置中，上下箭頭獨立在右側 */
+.row-table-cell,
+.row-seat-txt-cell {
     text-align: center;
 }
-.row-table-wrap {
+.row-table-wrap,
+.row-seat-wrap {
     display: inline-flex;
     align-items: stretch;
     max-width: 100%;
@@ -69,12 +71,14 @@
     background: transparent;
     vertical-align: middle;
 }
-.row-table-wrap:focus-within {
+.row-table-wrap:focus-within,
+.row-seat-wrap:focus-within {
     background: #fff;
     border-color: #d1d5db;
     box-shadow: 0 0 0 1px #e5e7eb;
 }
-.row-table-input {
+.row-table-input,
+.row-seat-input {
     width: 2.25rem;
     min-width: 0;
     border: none;
@@ -85,11 +89,14 @@
     appearance: textfield;
 }
 .row-table-input::-webkit-outer-spin-button,
-.row-table-input::-webkit-inner-spin-button {
+.row-table-input::-webkit-inner-spin-button,
+.row-seat-input::-webkit-outer-spin-button,
+.row-seat-input::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
 }
-.row-table-spin-btns {
+.row-table-spin-btns,
+.row-seat-spin-btns {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
@@ -97,7 +104,9 @@
     background: #f9fafb;
 }
 .row-table-spin-up,
-.row-table-spin-down {
+.row-table-spin-down,
+.row-seat-spin-up,
+.row-seat-spin-down {
     flex: 1;
     display: flex;
     align-items: center;
@@ -112,16 +121,21 @@
     cursor: pointer;
     user-select: none;
 }
-.row-table-spin-up {
+.row-table-spin-up,
+.row-seat-spin-up {
     border-bottom: 1px solid #e5e7eb;
 }
 .row-table-spin-up:hover,
-.row-table-spin-down:hover {
+.row-table-spin-down:hover,
+.row-seat-spin-up:hover,
+.row-seat-spin-down:hover {
     background: #f3f4f6;
     color: #374151;
 }
 .row-table-spin-up:active,
-.row-table-spin-down:active {
+.row-table-spin-down:active,
+.row-seat-spin-up:active,
+.row-seat-spin-down:active {
     background: #e5e7eb;
 }
 
@@ -191,18 +205,21 @@
         padding-left: 0.25rem !important;
         padding-right: 0.25rem !important;
     }
-    #excel-tbody input:not(.row-table-input),
+    #excel-tbody input:not(.row-table-input):not(.row-seat-input),
     #excel-tbody select,
-    #excel-tbody .row-seat-txt-cell,
+    #excel-tbody .row-seat-label,
     #excel-tbody button {
         font-size: 16px !important;
         padding: 0.25rem 0.4rem !important;
     }
-    #excel-tbody .row-table-input {
+    #excel-tbody .row-table-input,
+    #excel-tbody .row-seat-input {
         font-size: 16px !important;
     }
     #excel-tbody .row-table-spin-up,
-    #excel-tbody .row-table-spin-down {
+    #excel-tbody .row-table-spin-down,
+    #excel-tbody .row-seat-spin-up,
+    #excel-tbody .row-seat-spin-down {
         font-size: 8px !important;
         width: 1.25rem !important;
     }

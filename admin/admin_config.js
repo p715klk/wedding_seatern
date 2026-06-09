@@ -8,8 +8,22 @@ firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
 // 全局核心數據狀態
-let localGuestsList = []; 
+let localGuestsList = [];
+const DEFAULT_MAX_SEATS_PER_TABLE = 12;
+const ABSOLUTE_MAX_SEATS_PER_TABLE = 99;
+let tableSettingsCache = {};
 const PRIMARY_TAG_KEY = 'group';
+
+function getMaxSeatsForTable(tableNum) {
+    const n = parseInt(tableNum, 10);
+    if (isNaN(n)) return DEFAULT_MAX_SEATS_PER_TABLE;
+    const settings = tableSettingsCache[n] || tableSettingsCache[String(n)];
+    const configured = parseInt(settings?.max_seats, 10);
+    if (!isNaN(configured) && configured >= 1) {
+        return Math.min(configured, ABSOLUTE_MAX_SEATS_PER_TABLE);
+    }
+    return DEFAULT_MAX_SEATS_PER_TABLE;
+}
 
 let labelColumnsKeys = ['group']; 
 let labelColumnsNames = ['標籤 (可多選)']; 

@@ -40,33 +40,67 @@ function buildTagAddSelectHTML(columnKey, selectedTags) {
     return `<select onchange="handleTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border border-red-200 bg-red-50/20 rounded px-1 py-0.5 font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
 }
 
-function buildTableInputHTML(value = '') {
-    const valAttr = value ? `value="${value}"` : '';
+function buildNumberSpinInputHTML({ value = '', min = 1, max = 99, inputClass, oninput = '' }) {
+    const valAttr = value !== '' && value != null ? `value="${value}"` : '';
+    const oninputAttr = oninput ? ` oninput="${oninput}"` : '';
+    const wrapClass = inputClass.replace('-input', '-wrap');
+    const spinClass = inputClass.replace('-input', '-spin');
     return `
-        <div class="row-table-wrap">
-            <input type="number" min="1" max="99" placeholder="—" ${valAttr}
-                   oninput="recalculateSortNumbersFromDOM()"
-                   class="row-table-input font-mono font-bold bg-transparent focus:outline-none">
-            <div class="row-table-spin-btns">
-                <button type="button" tabindex="-1" onclick="stepTableInput(this, 1)" class="row-table-spin-up" aria-label="增加桌號">▲</button>
-                <button type="button" tabindex="-1" onclick="stepTableInput(this, -1)" class="row-table-spin-down" aria-label="減少桌號">▼</button>
+        <div class="${wrapClass}">
+            <input type="number" min="${min}" max="${max}" placeholder="—" ${valAttr}${oninputAttr}
+                   class="${inputClass} font-mono font-bold bg-transparent focus:outline-none">
+            <div class="${spinClass}-btns">
+                <button type="button" tabindex="-1" onclick="stepNumberSpinInput(this, 1)" class="${spinClass}-up" aria-label="增加">▲</button>
+                <button type="button" tabindex="-1" onclick="stepNumberSpinInput(this, -1)" class="${spinClass}-down" aria-label="減少">▼</button>
             </div>
         </div>
     `;
 }
 
-function stepTableInput(btn, delta) {
-    const input = btn.closest('.row-table-wrap').querySelector('.row-table-input');
+function buildTableInputHTML(value = '') {
+    return buildNumberSpinInputHTML({
+        value,
+        min: 1,
+        max: 99,
+        inputClass: 'row-table-input',
+        oninput: 'syncSeatCellForRow(this.closest(\'tr\'))'
+    });
+}
+
+function buildSeatInputHTML(value = '', tableNum = null) {
+    const maxSeats = tableNum != null ? getMaxSeatsForTable(tableNum) : ABSOLUTE_MAX_SEATS_PER_TABLE;
+    return buildNumberSpinInputHTML({
+        value,
+        min: 1,
+        max: maxSeats,
+        inputClass: 'row-seat-input'
+    });
+}
+
+function buildSeatCellContent(tableNum, seatValue = '') {
+    const seatInputHTML = buildSeatInputHTML(seatValue, tableNum);
+    return `<span class="row-seat-label inline-flex items-center gap-0.5 font-mono font-bold text-gray-600 flex-wrap justify-center">第 <span class="row-table-display-num">${tableNum}</span> 桌 - 第 ${seatInputHTML} 位</span>`;
+}
+
+function stepNumberSpinInput(btn, delta) {
+    const wrap = btn.closest('.row-table-wrap, .row-seat-wrap');
+    const input = wrap?.querySelector('.row-table-input, .row-seat-input');
     if (!input) return;
+    const max = parseInt(input.max, 10) || 99;
+    const min = parseInt(input.min, 10) || 1;
     let v = parseInt(input.value, 10);
     if (isNaN(v)) {
-        if (delta > 0) v = 1;
+        if (delta > 0) v = min;
         else return;
     } else {
-        v = Math.min(99, Math.max(1, v + delta));
+        v = Math.min(max, Math.max(min, v + delta));
     }
     input.value = v;
     input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function stepTableInput(btn, delta) {
+    stepNumberSpinInput(btn, delta);
 }
 
 function buildMultiTagCellHTML(columnKey, tags) {
@@ -132,7 +166,11 @@ function collectGuestFromRow(row) {
         name: nameInput.value.trim(),
         side: row.querySelector('.row-side-select').value,
         table: row.querySelector('.row-table-input').value.trim(),
-        sort: row.querySelector('.row-seat-num') ? row.querySelector('.row-seat-num').innerText : '99',
+        sort: (() => {
+            const seatInput = row.querySelector('.row-seat-input');
+            if (seatInput && seatInput.value.trim() !== '') return seatInput.value.trim();
+            return '99';
+        })(),
         group: readTagsFromRow(row, PRIMARY_TAG_KEY)
     };
     return guest.name ? guest : null;
@@ -237,12 +275,15 @@ function renderDOMRows() {
             if (!pool.includes(t)) pool.push(t);
         });
         const labelsTdHTML = buildMultiTagCellHTML(PRIMARY_TAG_KEY, tags);
+        const seatCellHTML = guest.table
+            ? buildSeatCellContent(guest.table, guest.sort || 1)
+            : '<span class="text-gray-400">未安排</span>';
 
         tr.innerHTML = `
             <td class="py-2 px-1 text-center font-mono text-gray-400 font-bold row-sort-num row-sort-cell">${index + 1}</td>
             <td class="py-2 px-1 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize row-drag-cell">☰</td>
             <td class="py-2 px-1 row-table-cell">${tableInputHTML}</td>
-            <td class="py-2 px-2 text-left font-mono font-bold text-gray-600 row-seat-txt-cell">第 <span class="row-table-display-num">${guest.table || '-'}</span> 桌 - 第 <span class="row-seat-num">${guest.table ? guest.sort : '-'}</span> 位</td>
+            <td class="py-2 px-2 text-center row-seat-txt-cell">${seatCellHTML}</td>
             <td class="py-2 px-2">
                 <input type="text" value="${guest.name}" class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-name-input">
             </td>
@@ -279,7 +320,7 @@ function addNewGuestRow() {
         <td class="py-2 px-1 text-center font-mono text-gray-400 font-bold row-sort-num row-sort-cell">${nextIndex}</td>
         <td class="py-2 px-1 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize row-drag-cell">☰</td>
         <td class="py-2 px-1 row-table-cell">${tableInputHTML}</td>
-        <td class="py-2 px-2 text-left font-mono font-bold text-gray-600 row-seat-txt-cell">未安排</td>
+        <td class="py-2 px-2 text-center row-seat-txt-cell"><span class="text-gray-400">未安排</span></td>
         <td class="py-2 px-2">
             <input type="text" value="" placeholder="請輸入姓名" class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-name-input">
         </td>
@@ -318,31 +359,65 @@ function deleteRowAction(btn) {
     recalculateSortNumbersFromDOM();
 }
 
+function getOccupiedSeatsOnTable(tableNum, excludeRow = null) {
+    const occupied = new Set();
+    tbody.querySelectorAll('tr').forEach(r => {
+        if (r === excludeRow) return;
+        const tableInput = r.querySelector('.row-table-input');
+        const seatInput = r.querySelector('.row-seat-input');
+        if (!tableInput || !seatInput) return;
+        const tVal = tableInput.value.trim();
+        if (tVal === '' || isNaN(tVal) || parseInt(tVal, 10) !== tableNum) return;
+        const seat = parseInt(seatInput.value, 10);
+        if (!isNaN(seat) && seat >= 1) occupied.add(seat);
+    });
+    return occupied;
+}
+
+function getSmallestAvailableSeat(tableNum, excludeRow = null) {
+    const occupied = getOccupiedSeatsOnTable(tableNum, excludeRow);
+    const tableMax = getMaxSeatsForTable(tableNum);
+    let highest = 0;
+    occupied.forEach(seat => { if (seat > highest) highest = seat; });
+    const limit = Math.min(Math.max(tableMax, highest + 1), ABSOLUTE_MAX_SEATS_PER_TABLE);
+    for (let i = 1; i <= limit; i++) {
+        if (!occupied.has(i)) return i;
+    }
+    return limit;
+}
+
+function syncSeatCellForRow(row) {
+    const tableInput = row.querySelector('.row-table-input');
+    const txtCell = row.querySelector('.row-seat-txt-cell');
+    if (!tableInput || !txtCell) return;
+
+    const tVal = tableInput.value.trim();
+    if (tVal === '' || isNaN(tVal)) {
+        txtCell.innerHTML = '<span class="text-gray-400">未安排</span>';
+        return;
+    }
+
+    const tableNum = parseInt(tVal, 10);
+    const existingSeat = row.querySelector('.row-seat-input');
+    const displayNum = txtCell.querySelector('.row-table-display-num');
+    const prevTable = displayNum ? parseInt(displayNum.textContent, 10) : NaN;
+
+    if (existingSeat && prevTable === tableNum) {
+        if (displayNum) displayNum.textContent = tableNum;
+        existingSeat.max = getMaxSeatsForTable(tableNum);
+        return;
+    }
+
+    const seatVal = getSmallestAvailableSeat(tableNum, row);
+    txtCell.innerHTML = buildSeatCellContent(tableNum, seatVal);
+}
+
 function recalculateSortNumbersFromDOM() {
     const rows = tbody.querySelectorAll('tr');
-    let tableCounters = {}; 
-
     rows.forEach((row, idx) => {
         const numEl = row.querySelector('.row-sort-num');
         if (numEl) numEl.innerText = idx + 1;
-
-        const tableInput = row.querySelector('.row-table-input');
-        const txtCell = row.querySelector('.row-seat-txt-cell');
-        
-        if (tableInput) {
-            const tVal = tableInput.value.trim();
-            if (tVal === "" || isNaN(tVal)) {
-                if (txtCell) txtCell.innerHTML = "未安排";
-            } else {
-                const tableNum = parseInt(tVal);
-                if (!tableCounters[tableNum]) tableCounters[tableNum] = 0;
-                tableCounters[tableNum]++;
-                
-                if (txtCell) {
-                    txtCell.innerHTML = `第 <span class="row-table-display-num">${tableNum}</span> 桌 - 第 <span class="row-seat-num">${tableCounters[tableNum]}</span> 位`;
-                }
-            }
-        }
+        syncSeatCellForRow(row);
     });
 }
 
