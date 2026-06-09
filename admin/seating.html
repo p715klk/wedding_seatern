@@ -16,6 +16,13 @@
             overscroll-behavior: none;
             -webkit-touch-callout: none;
         }
+        #seating-app > header,
+        #seating-app > header button,
+        #seating-app > header a,
+        #print-menu,
+        #print-menu button {
+            touch-action: manipulation;
+        }
         .workspace-canvas {
             --zoom: 1;
             background-color: #f3f4f6;
@@ -348,10 +355,16 @@
         }
         .print-tables-layout {
             position: relative;
-            width: 100%;
-            height: 100%;
             box-sizing: border-box;
             background: #fff;
+            overflow: hidden;
+        }
+        .print-tables-scale-group {
+            position: absolute;
+            transform-origin: top left;
+        }
+        .print-tables-layout .draggable-table {
+            --zoom: 1;
         }
         .print-tables-layout .draggable-table {
             pointer-events: none;
@@ -486,8 +499,8 @@
                     🖨️<span class="hide-mobile"> 打印</span>
                 </button>
                 <div id="print-menu" class="hidden absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-xs font-bold overflow-hidden">
-                    <button type="button" data-print-action="canvas" class="w-full text-left px-3 py-2 hover:bg-slate-50 active:bg-slate-100 text-slate-700">🖼️ 打印畫面（全部枱位）</button>
-                    <button type="button" data-print-action="guest-list" class="w-full text-left px-3 py-2 hover:bg-slate-50 active:bg-slate-100 text-slate-700 border-t border-slate-100">📋 打印圓枱名單（文字版）</button>
+                    <button type="button" onclick="handlePrintMenuAction('canvas', event)" class="w-full text-left px-3 py-2 hover:bg-slate-50 active:bg-slate-100 text-slate-700">🖼️ 打印畫面（全部枱位）</button>
+                    <button type="button" onclick="handlePrintMenuAction('guest-list', event)" class="w-full text-left px-3 py-2 hover:bg-slate-50 active:bg-slate-100 text-slate-700 border-t border-slate-100">📋 打印圓枱名單（文字版）</button>
                 </div>
             </div>
             <a href="admin.html" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition">
@@ -638,6 +651,6 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script src="seating.js?v=4"></script>
+    <script src="seating.js?v=5"></script>
 </body>
 </html>

@@ -881,8 +881,7 @@ function positionPrintMenuFixed() {
 }
 
 function togglePrintMenu(e) {
-    e.stopPropagation();
-    e.preventDefault();
+    if (e) e.stopPropagation();
     const menu = document.getElementById('print-menu');
     if (!menu) return;
     const willOpen = menu.classList.contains('hidden');
@@ -895,34 +894,15 @@ function togglePrintMenu(e) {
     }
 }
 
-function initPrintMenu() {
-    const menu = document.getElementById('print-menu');
-    if (!menu || menu.dataset.bound === '1') return;
-    menu.dataset.bound = '1';
-
-    menu.querySelectorAll('button[data-print-action]').forEach(btn => {
-        let lastActionAt = 0;
-        const runAction = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (Date.now() - lastActionAt < 500) return;
-            lastActionAt = Date.now();
-            printMenuIgnoreCloseUntil = Date.now() + 400;
-            closePrintMenu();
-            const action = btn.dataset.printAction;
-            if (action === 'canvas') printCanvasView();
-            else if (action === 'guest-list') printGuestListView();
-        };
-
-        btn.addEventListener('click', runAction);
-        if (IS_TOUCH_DEVICE) {
-            btn.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                runAction(e);
-            }, { passive: false });
-        }
-    });
+function handlePrintMenuAction(action, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    printMenuIgnoreCloseUntil = Date.now() + 600;
+    closePrintMenu();
+    if (action === 'canvas') printCanvasView();
+    else if (action === 'guest-list') printGuestListView();
 }
 
 document.addEventListener('click', (e) => {
@@ -965,7 +945,7 @@ function computePrintFitScale(bounds) {
 }
 
 function computePrintLayoutZoom(bounds) {
-    return Math.min(2, Math.max(0.08, computePrintFitScale(bounds)));
+    return Math.max(0.05, computePrintFitScale(bounds));
 }
 
 function requireTablesBounds() {
@@ -1044,6 +1024,7 @@ async function rasterizePrintToImageHTML(buildHTML) {
     try {
         if (document.fonts?.ready) await document.fonts.ready;
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        await new Promise(resolve => setTimeout(resolve, 50));
 
         const target = staging.firstElementChild;
         const snapshot = await html2canvas(target, {
@@ -1052,7 +1033,9 @@ async function rasterizePrintToImageHTML(buildHTML) {
             width: page.w,
             height: page.h,
             useCORS: true,
-            logging: false
+            logging: false,
+            windowWidth: page.w,
+            windowHeight: page.h
         });
         const dataUrl = snapshot.toDataURL('image/png');
         return `<div class="print-image-layout" style="width:${page.w}px;height:${page.h}px"><img src="${dataUrl}" alt="列印預覽" width="${page.w}" height="${page.h}"></div>`;
@@ -1079,24 +1062,29 @@ function buildCanvasPrintHTML() {
     const pad = PRINT_PAGE_PAD;
     const spanW = bounds.maxX - bounds.minX;
     const spanH = bounds.maxY - bounds.minY;
-    printLayoutZoom = computePrintLayoutZoom(bounds);
+    const fitScale = computePrintLayoutZoom(bounds);
+    printLayoutZoom = fitScale;
 
-    const contentW = (spanW + pad * 2) * printLayoutZoom;
-    const contentH = (spanH + pad * 2) * printLayoutZoom;
-    const offsetX = (page.w - contentW) / 2;
-    const offsetY = (page.h - contentH) / 2;
+    const innerW = spanW + pad * 2;
+    const innerH = spanH + pad * 2;
+    const scaledW = innerW * fitScale;
+    const scaledH = innerH * fitScale;
+    const offsetX = (page.w - scaledW) / 2;
+    const offsetY = (page.h - scaledH) / 2;
 
     const tablesHTML = Array.from(canvas.querySelectorAll('.draggable-table')).map(el => {
         const bx = parseFloat(el.dataset.baseX);
         const by = parseFloat(el.dataset.baseY);
         const plate = el.querySelector('.table-plate');
         if (!plate) return '';
-        const left = offsetX + (bx - bounds.minX + pad) * printLayoutZoom;
-        const top = offsetY + (by - bounds.minY + pad) * printLayoutZoom;
-        return `<div class="draggable-table" style="left:${left}px;top:${top}px">${cloneTablePlateForPrint(plate)}</div>`;
+        const left = bx - bounds.minX + pad;
+        const top = by - bounds.minY + pad;
+        return `<div class="draggable-table" style="left:${left}px;top:${top}px;--zoom:1">${cloneTablePlateForPrint(plate)}</div>`;
     }).join('');
 
-    return `<div class="print-tables-layout" style="--zoom:${printLayoutZoom}">${tablesHTML}</div>`;
+    return `<div class="print-tables-layout" style="width:${page.w}px;height:${page.h}px;--zoom:1">
+        <div class="print-tables-scale-group" style="left:${offsetX}px;top:${offsetY}px;width:${innerW}px;height:${innerH}px;transform:scale(${fitScale})">${tablesHTML}</div>
+    </div>`;
 }
 
 function applyPrintPreviewTransform() {
@@ -1167,7 +1155,10 @@ function rebuildPrintPreviewContent() {
     printPreviewIsRaster = false;
     sheet.innerHTML = printPreviewBuilder();
     printPreviewZoom = savedZoom;
-    requestAnimationFrame(() => applyPrintPreviewTransform());
+    requestAnimationFrame(() => {
+        applyPrintPreviewTransform();
+        if (isMobileViewport()) fitPrintPreviewZoom();
+    });
 }
 
 function showPrintPreview(contentHTML, cleanup, options = {}) {
@@ -1194,7 +1185,10 @@ function showPrintPreview(contentHTML, cleanup, options = {}) {
     document.body.classList.add('print-preview-open');
     overlay.classList.remove('hidden');
     document.getElementById('print-preview-scroll')?.scrollTo(0, 0);
-    requestAnimationFrame(() => applyPrintPreviewTransform());
+    requestAnimationFrame(() => {
+        applyPrintPreviewTransform();
+        if (isMobileViewport()) fitPrintPreviewZoom();
+    });
 }
 
 function closePrintPreview() {
@@ -1240,28 +1234,37 @@ function buildGuestCirclePrintHTML() {
     const page = getPrintPageInnerSize();
     const sheetW = page.w;
     const sheetH = page.h;
+    const titleBleed = 24;
     const spanW = bounds.maxX - bounds.minX;
-    const spanH = bounds.maxY - bounds.minY;
-    const scale = computePrintFitScale(bounds);
-    const floorW = spanW * scale;
-    const floorH = spanH * scale;
-    const titleH = 22 * scale;
+    const spanH = bounds.maxY - bounds.minY + titleBleed;
+    const pad = PRINT_PAGE_PAD;
+    const fitScale = Math.max(0.05, Math.min(
+        (sheetW - pad * 2) / spanW,
+        (sheetH - pad * 2) / spanH
+    ));
+    const innerW = spanW + pad * 2;
+    const innerH = spanH + pad * 2;
+    const scaledW = innerW * fitScale;
+    const scaledH = innerH * fitScale;
+    const offsetX = (sheetW - scaledW) / 2;
+    const offsetY = (sheetH - scaledH) / 2;
 
     const sortedTableNums = Object.keys(tableSettings).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
 
     const circles = sortedTableNums.map(tableNum => {
         const settings = tableSettings[tableNum];
         const idx = parseInt(tableNum, 10);
-        const left = (settings.x - bounds.minX) * scale;
-        const top = (settings.y - bounds.minY) * scale;
-        const size = TABLE_DIM * scale;
+        const left = (settings.x - bounds.minX) + pad;
+        const top = (settings.y - bounds.minY) + pad;
+        const size = TABLE_DIM;
         const guests = (allGuests[idx] || [])
             .filter(g => g && g.name)
             .sort((a, b) => (a.sort || 99) - (b.sort || 99));
         const colCount = getPrintNameColumnCount(guests.length);
         const fontSize = Math.max(9, Math.min(13, size * 0.032));
         const titleSize = Math.max(10, Math.min(15, size * 0.05));
-        const borderW = Math.max(1.5, scale * 1.8);
+        const titleH = 22;
+        const borderW = 1.8;
         const names = guests.length
             ? guests.map(g => `<span class="print-name-item">${escapeHtml(g.name)}</span>`).join('')
             : '<span class="print-empty">—</span>';
@@ -1276,10 +1279,10 @@ function buildGuestCirclePrintHTML() {
         `;
     }).join('');
 
-    const offsetX = (sheetW - floorW) / 2;
-    const offsetY = (sheetH - (floorH + titleH)) / 2;
-    return `<div class="print-floor" style="width:${sheetW}px;height:${sheetH}px">
-        <div class="print-floor-inner" style="position:relative;width:${floorW}px;height:${floorH + titleH}px;left:${offsetX}px;top:${offsetY}px">${circles}</div>
+    return `<div class="print-floor" style="width:${sheetW}px;height:${sheetH}px;overflow:hidden">
+        <div class="print-tables-scale-group" style="left:${offsetX}px;top:${offsetY}px;width:${innerW}px;height:${innerH}px;transform:scale(${fitScale});transform-origin:top left">
+            <div class="print-floor-inner" style="position:relative;width:${spanW}px;height:${spanH}px;left:${pad}px;top:${pad}px">${circles}</div>
+        </div>
     </div>`;
 }
 
@@ -1535,7 +1538,6 @@ function runRender() {
 function bootstrapSeatingView() {
     runRender();
     initMobileExperience();
-    initPrintMenu();
     updateTableLockUI();
     if (seatingViewBootstrapped) return;
     seatingViewBootstrapped = true;
