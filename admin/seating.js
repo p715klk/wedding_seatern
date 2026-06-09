@@ -511,8 +511,8 @@ function fitViewToTables() {
     const groupW = bounds.maxX - bounds.minX;
     const groupH = bounds.maxY - bounds.minY;
     const vpRect = viewport.getBoundingClientRect();
-    const sidebarWidth = getSidebarWidth();
-    const vpW = vpRect.width - sidebarWidth;
+    const sidebarWidth = isSidebarOpen ? getSidebarWidth() : 0;
+    const vpW = Math.max(0, vpRect.width - sidebarWidth);
     const vpH = vpRect.height;
     const mobile = isMobileViewport();
     const padding = mobile ? 24 : 100;
@@ -1284,6 +1284,26 @@ function cancelTableDrag() {
     draggedTableElement = null;
 }
 
+let seatingViewBootstrapped = false;
+
+function runRender() {
+    renderSidebar();
+    renderCanvasTables();
+    updateGlobalStats();
+    applyTransform();
+}
+
+function bootstrapSeatingView() {
+    runRender();
+    initMobileExperience();
+    updateTableLockUI();
+    if (seatingViewBootstrapped) return;
+    seatingViewBootstrapped = true;
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => fitViewToTables());
+    });
+}
+
 // Firebase 實時同步
 database.ref().on('value', (snapshot) => {
     const root = snapshot.val() || {};
@@ -1316,30 +1336,15 @@ database.ref().on('value', (snapshot) => {
         return; 
     }
 
-    const runRender = () => {
-        renderSidebar();
-        renderCanvasTables();
-        updateGlobalStats();
-        applyTransform();
-    };
-
     if (!localStorage.getItem('seating_grid_snap_v1')) {
-        snapAllTablesToGrid().then((moved) => {
+        snapAllTablesToGrid().then(() => {
             localStorage.setItem('seating_grid_snap_v1', '1');
-            if (!moved) runRender();
+            bootstrapSeatingView();
         });
         return;
     }
 
-    runRender();
-    initMobileExperience();
-    updateTableLockUI();
-    if (isMobileViewport()) {
-        fitViewToTables();
-    } else if (!localStorage.getItem('seating_view_fitted_v3')) {
-        fitViewToTables();
-        localStorage.setItem('seating_view_fitted_v3', '1');
-    }
+    bootstrapSeatingView();
 });
 
 window.addEventListener('resize', () => {
