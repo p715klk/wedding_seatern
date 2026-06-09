@@ -53,13 +53,15 @@ function tagChipSideClasses(side) {
         return {
             chip: 'bg-rose-100 text-rose-800',
             btn: 'text-rose-500 hover:text-rose-700',
-            select: 'border-rose-200 bg-rose-50/20'
+            select: 'border-rose-200 bg-rose-50/20',
+            pool: 'bg-rose-50 text-rose-700 border-rose-200'
         };
     }
     return {
         chip: 'bg-blue-100 text-blue-800',
         btn: 'text-blue-500 hover:text-blue-700',
-        select: 'border-blue-200 bg-blue-50/20'
+        select: 'border-blue-200 bg-blue-50/20',
+        pool: 'bg-blue-50 text-blue-700 border-blue-200'
     };
 }
 
@@ -148,7 +150,6 @@ function closeCustomCategoryDialog(isConfirm) {
         if (newCat && !categoriesByColumn[activeColumnKey].includes(newCat)) {
             categoriesByColumn[activeColumnKey].push(newCat);
             persistMetaLabelColumns();
-            refreshModalTagAddSelect(activeColumnKey);
             insertModalTagChip(activeColumnKey, newCat);
             refreshModalTagAddSelect(activeColumnKey);
         }
@@ -181,9 +182,12 @@ function isMobileViewport() {
     return window.matchMedia('(max-width: 768px)').matches;
 }
 
-function getSidebarWidth() {
-    if (!isSidebarOpen) return 0;
+function getSidebarPanelWidth() {
     return isMobileViewport() ? Math.min(window.innerWidth * 0.88, 300) : 320;
+}
+
+function getSidebarWidth() {
+    return isSidebarOpen ? getSidebarPanelWidth() : 0;
 }
 
 function bindGuestTap(element, onTap) {
@@ -310,19 +314,13 @@ function updateAllTablePositions() {
 viewport.addEventListener('wheel', (e) => {
     e.preventDefault();
     const zoomFactor = 1.08;
-    let nextZoom = e.deltaY < 0 ? zoom * zoomFactor : zoom / zoomFactor;
-    nextZoom = Math.min(2.5, Math.max(0.35, nextZoom));
-
+    const nextZoom = e.deltaY < 0 ? zoom * zoomFactor : zoom / zoomFactor;
     const rect = viewport.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    const canvasX = (mouseX - panX) / zoom;
-    const canvasY = (mouseY - panY) / zoom;
-
-    zoom = nextZoom;
-    panX = mouseX - canvasX * zoom;
-    panY = mouseY - canvasY * zoom;
-    applyTransform();
+    zoomAtPoint(
+        Math.min(2.5, Math.max(0.35, nextZoom)),
+        e.clientX - rect.left,
+        e.clientY - rect.top
+    );
 }, { passive: false });
 
 function canStartCanvasPan(target) {
@@ -400,13 +398,8 @@ viewport.addEventListener('touchmove', (e) => {
         const dist = getTouchDistance(e.touches);
         const scale = dist / lastPinchDist;
         const center = getTouchCenter(e.touches);
-        const canvasX = (center.x - panX) / zoom;
-        const canvasY = (center.y - panY) / zoom;
-        zoom = Math.min(2.5, Math.max(0.15, zoom * scale));
-        panX = center.x - canvasX * zoom;
-        panY = center.y - canvasY * zoom;
+        zoomAtPoint(Math.min(2.5, Math.max(0.15, zoom * scale)), center.x, center.y);
         lastPinchDist = dist;
-        applyTransform();
         return;
     }
 
@@ -443,15 +436,11 @@ viewport.addEventListener('contextmenu', e => e.preventDefault());
 
 function zoomCanvas(factor) {
     const rect = viewport.getBoundingClientRect();
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-    const canvasX = (centerX - panX) / zoom;
-    const canvasY = (centerY - panY) / zoom;
-
-    zoom = Math.min(2.5, Math.max(0.35, zoom * factor));
-    panX = centerX - canvasX * zoom;
-    panY = centerY - canvasY * zoom;
-    applyTransform();
+    zoomAtPoint(
+        Math.min(2.5, Math.max(0.35, zoom * factor)),
+        rect.width / 2,
+        rect.height / 2
+    );
 }
 
 function getTablesBoundingBox() {
@@ -621,13 +610,17 @@ function formatAttachSubline(text) {
     return `<span class="name-subline">${noBreakSpaces(text)}</span>`;
 }
 
+function isCJKWord(text) {
+    return /^[\u4e00-\u9fff]+$/.test(text);
+}
+
 function isCJKOnlyText(text) {
-    return /^[\u4e00-\u9fff]+$/.test((text || '').replace(/\s/g, ''));
+    return isCJKWord((text || '').replace(/\s/g, ''));
 }
 
 function formatCJKMainPart(mainPart) {
     const parts = mainPart.trim().split(/\s+/);
-    if (parts.length === 2 && parts.every(p => /^[\u4e00-\u9fff]+$/.test(p))) {
+    if (parts.length === 2 && parts.every(isCJKWord)) {
         return `${escapeHtml(parts[0])}<br>${escapeHtml(parts[1])}`;
     }
     const cjkMain = mainPart.replace(/\s/g, '');
@@ -708,7 +701,7 @@ function formatGuestDisplayName(name) {
     }
 
     const cjkOnly = trimmed.replace(/\s/g, '');
-    if (/^[\u4e00-\u9fff]+$/.test(cjkOnly)) {
+    if (isCJKOnlyText(cjkOnly)) {
         if (cjkOnly.length <= 5) return escapeHtml(cjkOnly);
         return splitCJKNameEvenly(cjkOnly);
     }
@@ -726,12 +719,12 @@ function formatGuestDisplayName(name) {
             }
         }
         const parts = trimmed.split(/\s+/);
-        if (parts.length === 2 && parts.every(p => /^[\u4e00-\u9fff]+$/.test(p))) {
+        if (parts.length === 2 && parts.every(isCJKWord)) {
             return `${escapeHtml(parts[0])}<br>${escapeHtml(parts[1])}`;
         }
         const compactLen = trimmed.replace(/\s/g, '').length;
         if (compactLen <= 5) return escapeHtml(trimmed);
-        if (compactLen === 6 && parts.every(p => /^[\u4e00-\u9fff]+$/.test(p))) {
+        if (compactLen === 6 && parts.every(isCJKWord)) {
             return splitCJKNameEvenly(trimmed.replace(/\s/g, ''));
         }
         if (isLatinGuestName(trimmed)) return splitLatinNameEvenly(trimmed);
@@ -774,10 +767,6 @@ function getSidebarRightEdge() {
         return content.getBoundingClientRect().right;
     }
     return getSidebarWidth();
-}
-
-function getSidebarPanelWidth() {
-    return isMobileViewport() ? Math.min(window.innerWidth * 0.88, 300) : 320;
 }
 
 function openSidebar({ instant = false } = {}) {
@@ -889,6 +878,7 @@ function snapPrintPreviewZoom(value) {
 }
 
 const PRINT_PAGE_PAD = 10;
+const PRINT_EMPTY_MSG = '目前沒有任何枱位資料。';
 
 function getPrintPageInnerSize(orientation = printPreviewOrientation) {
     // A4 @ 96dpi，扣除 5mm 邊距後可印區域
@@ -896,15 +886,33 @@ function getPrintPageInnerSize(orientation = printPreviewOrientation) {
     return { w: 756, h: 1085 };
 }
 
-function computePrintLayoutZoom(bounds) {
+function computePrintFitScale(bounds) {
     const spanW = bounds.maxX - bounds.minX;
     const spanH = bounds.maxY - bounds.minY;
     const page = getPrintPageInnerSize();
-    const fitZoom = Math.min(
+    return Math.min(
         (page.w - PRINT_PAGE_PAD * 2) / spanW,
         (page.h - PRINT_PAGE_PAD * 2) / spanH
     );
-    return Math.min(2, Math.max(0.08, fitZoom));
+}
+
+function computePrintLayoutZoom(bounds) {
+    return Math.min(2, Math.max(0.08, computePrintFitScale(bounds)));
+}
+
+function requireTablesBounds() {
+    const bounds = getTablesBoundingBox();
+    if (!bounds) {
+        alert(`❌ ${PRINT_EMPTY_MSG}`);
+        return null;
+    }
+    return bounds;
+}
+
+function openPrintPreview(buildHTML) {
+    closePrintMenu();
+    if (!requireTablesBounds()) return;
+    showPrintPreview(buildHTML());
 }
 
 function cloneTablePlateForPrint(plate) {
@@ -919,7 +927,7 @@ function cloneTablePlateForPrint(plate) {
 
 function buildCanvasPrintHTML() {
     const bounds = getTablesBoundingBox();
-    if (!bounds) return '<p class="print-empty">目前沒有任何枱位資料。</p>';
+    if (!bounds) return `<p class="print-empty">${PRINT_EMPTY_MSG}</p>`;
 
     const page = getPrintPageInnerSize();
     const pad = PRINT_PAGE_PAD;
@@ -1067,12 +1075,7 @@ function executePrintPreview() {
 }
 
 function printCanvasView() {
-    closePrintMenu();
-    if (!getTablesBoundingBox()) {
-        alert('❌ 目前沒有任何枱位資料。');
-        return;
-    }
-    showPrintPreview(buildCanvasPrintHTML());
+    openPrintPreview(buildCanvasPrintHTML);
 }
 
 function getPrintNameColumnCount(guestCount) {
@@ -1082,15 +1085,12 @@ function getPrintNameColumnCount(guestCount) {
 
 function buildGuestCirclePrintHTML() {
     const bounds = getTablesBoundingBox();
-    if (!bounds) return '<p class="print-empty">目前沒有任何枱位資料。</p>';
+    if (!bounds) return `<p class="print-empty">${PRINT_EMPTY_MSG}</p>`;
 
     const page = getPrintPageInnerSize();
     const sheetW = page.w;
     const sheetH = page.h;
-    const pad = PRINT_PAGE_PAD;
-    const spanW = bounds.maxX - bounds.minX;
-    const spanH = bounds.maxY - bounds.minY;
-    const scale = Math.min((sheetW - pad * 2) / spanW, (sheetH - pad * 2) / spanH);
+    const scale = computePrintFitScale(bounds);
     const floorW = spanW * scale;
     const floorH = spanH * scale;
     const titleH = 22 * scale;
@@ -1132,12 +1132,7 @@ function buildGuestCirclePrintHTML() {
 }
 
 function printGuestListView() {
-    closePrintMenu();
-    if (!getTablesBoundingBox()) {
-        alert('❌ 目前沒有任何枱位資料。');
-        return;
-    }
-    showPrintPreview(buildGuestCirclePrintHTML());
+    openPrintPreview(buildGuestCirclePrintHTML);
 }
 
 let isDraggingTable = false;
@@ -1156,6 +1151,19 @@ function createDragGhost(name, x, y) {
     return ghost;
 }
 
+function findGuestBySeat(tableIdx, seatIndex) {
+    const guests = allGuests[tableIdx];
+    if (!guests) return -1;
+    return guests.findIndex(g => g && g.sort === seatIndex + 1);
+}
+
+function persistGuestState() {
+    return database.ref().update({
+        wedding_guests: allGuests,
+        unassigned_guests: unassignedPool
+    });
+}
+
 function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
     const { fromTable, index, seatIndex } = data;
     const toTableIdx = parseInt(toTableNum, 10);
@@ -1169,7 +1177,7 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
         unassignedPool.splice(index, 1);
     } else {
         const fromTableIdx = parseInt(fromTable, 10);
-        const foundIdx = allGuests[fromTableIdx].findIndex(g => g && g.sort === (seatIndex + 1));
+        const foundIdx = findGuestBySeat(fromTableIdx, seatIndex);
         if (foundIdx !== -1) {
             movingGuestObj = allGuests[fromTableIdx][foundIdx];
             allGuests[fromTableIdx].splice(foundIdx, 1);
@@ -1195,10 +1203,7 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
     movingGuestObj.sort = targetSortNum;
     allGuests[toTableIdx].push(movingGuestObj);
 
-    database.ref().update({
-        wedding_guests: allGuests,
-        unassigned_guests: unassignedPool
-    });
+    persistGuestState();
 }
 
 function moveGuestToPool(data) {
@@ -1206,7 +1211,7 @@ function moveGuestToPool(data) {
     if (!fromTable || fromTable === 'POOL') return;
 
     const fromTableIdx = parseInt(fromTable, 10);
-    const foundIdx = allGuests[fromTableIdx].findIndex(g => g && g.sort === (seatIndex + 1));
+    const foundIdx = findGuestBySeat(fromTableIdx, seatIndex);
     if (foundIdx === -1) return;
 
     const movingGuestObj = allGuests[fromTableIdx][foundIdx];
@@ -1215,10 +1220,7 @@ function moveGuestToPool(data) {
     if (!unassignedPool) unassignedPool = [];
     unassignedPool.push(movingGuestObj);
 
-    database.ref().update({
-        wedding_guests: allGuests,
-        unassigned_guests: unassignedPool
-    });
+    persistGuestState();
 }
 
 function resolvePointerDrop(clientX, clientY, data) {
@@ -1236,66 +1238,42 @@ function resolvePointerDrop(clientX, clientY, data) {
     }
 }
 
-function setupTouchDrag(el, getDragData, options) {
-    const opts = typeof options === 'function' ? { onDragStart: options } : (options || {});
-    if (opts.closeSidebarOnLeave) {
-        setupPoolTouchDrag(el, getDragData, opts);
-        return;
+const GUEST_DRAG_THRESHOLD = 14;
+
+function finishGuestTouchDrag(dragging, dragData, ghost, clientX, clientY) {
+    if (dragging && dragData) {
+        if (ghost) ghost.style.visibility = 'hidden';
+        resolvePointerDrop(clientX, clientY, dragData);
     }
-
-    let startX = 0, startY = 0, dragging = false, ghost = null, dragData = null;
-    const threshold = 14;
-
-    el.addEventListener('touchstart', (e) => {
-        if (e.touches.length !== 1) return;
-        e.stopPropagation();
-        resetTouchGestures();
-        cancelTableDrag();
-        startX = e.touches[0].clientX;
-        startY = e.touches[0].clientY;
-        dragging = false;
-    }, { passive: true });
-
-    el.addEventListener('touchmove', (e) => {
-        if (e.touches.length !== 1) return;
-        const t = e.touches[0];
-        const dist = Math.hypot(t.clientX - startX, t.clientY - startY);
-        if (!dragging && dist > threshold) {
-            dragging = true;
-            isGuestDragging = true;
-            dragData = getDragData();
-            ghost = createDragGhost(dragData.name || '', t.clientX, t.clientY);
-            if (opts.onDragStart) opts.onDragStart(dragData);
-        }
-        if (dragging) {
-            e.preventDefault();
-            ghost.style.left = `${t.clientX}px`;
-            ghost.style.top = `${t.clientY}px`;
-            openSidebarIfDragEntersSidebar(t.clientX);
-            if (opts.onDragMove) opts.onDragMove(t.clientX, t.clientY, dragData);
-        }
-    }, { passive: false });
-
-    const endDrag = (e) => {
-        if (dragging && dragData) {
-            const t = e.changedTouches[0];
-            if (ghost) ghost.style.visibility = 'hidden';
-            resolvePointerDrop(t.clientX, t.clientY, dragData);
-        }
-        if (ghost) ghost.remove();
-        dragging = false;
-        ghost = null;
-        dragData = null;
-        isGuestDragging = false;
-        cancelTableDrag();
-    };
-
-    el.addEventListener('touchend', endDrag, { passive: true });
-    el.addEventListener('touchcancel', endDrag, { passive: true });
+    if (ghost) ghost.remove();
+    isGuestDragging = false;
+    cancelTableDrag();
 }
 
-function setupPoolTouchDrag(el, getDragData, opts) {
-    const threshold = 14;
+function handleGuestTouchMove(t, startX, startY, state, opts, sidebarRight, ev) {
+    openSidebarIfDragEntersSidebar(t.clientX);
+    if (sidebarRight != null) closeSidebarIfDragLeavesSidebar(t.clientX, sidebarRight);
+
+    const dist = Math.hypot(t.clientX - startX, t.clientY - startY);
+    if (!state.dragging && dist > GUEST_DRAG_THRESHOLD) {
+        state.dragging = true;
+        isGuestDragging = true;
+        state.dragData = opts.getDragData();
+        state.ghost = createDragGhost(state.dragData.name || '', t.clientX, t.clientY);
+        if (opts.onDragStart) opts.onDragStart(state.dragData);
+    }
+    if (state.dragging) {
+        if (ev) ev.preventDefault();
+        state.ghost.style.left = `${t.clientX}px`;
+        state.ghost.style.top = `${t.clientY}px`;
+        if (opts.onDragMove) opts.onDragMove(t.clientX, t.clientY, state.dragData);
+    }
+}
+
+function setupTouchDrag(el, getDragData, options) {
+    const opts = typeof options === 'function' ? { onDragStart: options } : (options || {});
+    const useDocListeners = !!opts.closeSidebarOnLeave;
+    opts.getDragData = getDragData;
 
     el.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 1) return;
@@ -1304,12 +1282,10 @@ function setupPoolTouchDrag(el, getDragData, opts) {
         cancelTableDrag();
 
         const touchId = e.touches[0].identifier;
-        let startX = e.touches[0].clientX;
-        let startY = e.touches[0].clientY;
-        let dragging = false;
-        let ghost = null;
-        let dragData = null;
-        const sidebarRight = getSidebarRightEdge();
+        const startX = e.touches[0].clientX;
+        const startY = e.touches[0].clientY;
+        const state = { dragging: false, ghost: null, dragData: null };
+        const sidebarRight = useDocListeners ? getSidebarRightEdge() : null;
 
         const findTouch = (list) => {
             for (let i = 0; i < list.length; i++) {
@@ -1318,50 +1294,67 @@ function setupPoolTouchDrag(el, getDragData, opts) {
             return null;
         };
 
-        const onDocMove = (ev) => {
-            const t = findTouch(ev.touches);
-            if (!t) return;
+        if (useDocListeners) {
+            const onDocMove = (ev) => {
+                const t = findTouch(ev.touches);
+                if (!t) return;
+                handleGuestTouchMove(t, startX, startY, state, opts, sidebarRight, ev);
+            };
+            const onDocEnd = (ev) => {
+                const ended = findTouch(ev.changedTouches);
+                if (!ended) return;
+                document.removeEventListener('touchmove', onDocMove, true);
+                document.removeEventListener('touchend', onDocEnd, true);
+                document.removeEventListener('touchcancel', onDocEnd, true);
+                finishGuestTouchDrag(state.dragging, state.dragData, state.ghost, ended.clientX, ended.clientY);
+            };
+            document.addEventListener('touchmove', onDocMove, { passive: false, capture: true });
+            document.addEventListener('touchend', onDocEnd, { capture: true });
+            document.addEventListener('touchcancel', onDocEnd, { capture: true });
+            return;
+        }
 
-            openSidebarIfDragEntersSidebar(t.clientX);
-            closeSidebarIfDragLeavesSidebar(t.clientX, sidebarRight);
-
-            const dist = Math.hypot(t.clientX - startX, t.clientY - startY);
-            if (!dragging && dist > threshold) {
-                dragging = true;
-                isGuestDragging = true;
-                dragData = getDragData();
-                ghost = createDragGhost(dragData.name || '', t.clientX, t.clientY);
-                if (opts.onDragStart) opts.onDragStart(dragData);
-            }
-            if (dragging) {
-                ev.preventDefault();
-                ghost.style.left = `${t.clientX}px`;
-                ghost.style.top = `${t.clientY}px`;
-                if (opts.onDragMove) opts.onDragMove(t.clientX, t.clientY, dragData);
-            }
+        const onElMove = (ev) => {
+            if (ev.touches.length !== 1) return;
+            handleGuestTouchMove(ev.touches[0], startX, startY, state, opts, null, ev);
         };
-
-        const onDocEnd = (ev) => {
-            const ended = findTouch(ev.changedTouches);
-            if (!ended) return;
-
-            document.removeEventListener('touchmove', onDocMove, true);
-            document.removeEventListener('touchend', onDocEnd, true);
-            document.removeEventListener('touchcancel', onDocEnd, true);
-
-            if (dragging && dragData) {
-                if (ghost) ghost.style.visibility = 'hidden';
-                resolvePointerDrop(ended.clientX, ended.clientY, dragData);
-            }
-            if (ghost) ghost.remove();
-            isGuestDragging = false;
-            cancelTableDrag();
+        const onElEnd = (ev) => {
+            el.removeEventListener('touchmove', onElMove);
+            el.removeEventListener('touchend', onElEnd);
+            el.removeEventListener('touchcancel', onElEnd);
+            const t = ev.changedTouches[0];
+            finishGuestTouchDrag(state.dragging, state.dragData, state.ghost, t.clientX, t.clientY);
         };
-
-        document.addEventListener('touchmove', onDocMove, { passive: false, capture: true });
-        document.addEventListener('touchend', onDocEnd, { capture: true });
-        document.addEventListener('touchcancel', onDocEnd, { capture: true });
+        el.addEventListener('touchmove', onElMove, { passive: false });
+        el.addEventListener('touchend', onElEnd, { passive: true });
+        el.addEventListener('touchcancel', onElEnd, { passive: true });
     }, { passive: true });
+}
+
+function setupDesktopGuestDrag(el, getDragData, options = {}) {
+    el.setAttribute('draggable', 'true');
+    if (options.pointerDown) {
+        el.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
+            e.stopPropagation();
+            cancelTableDrag();
+            isGuestDragging = true;
+        });
+    }
+    el.addEventListener('dragstart', (e) => {
+        e.stopPropagation();
+        cancelTableDrag();
+        isGuestDragging = true;
+        e.dataTransfer.setData('text/plain', JSON.stringify(getDragData()));
+    });
+    el.addEventListener('drag', (e) => {
+        openSidebarIfDragEntersSidebar(e.clientX);
+        if (options.trackSidebarLeave) closeSidebarIfDragLeavesSidebar(e.clientX);
+    });
+    el.addEventListener('dragend', () => {
+        isGuestDragging = false;
+        cancelTableDrag();
+    });
 }
 
 function cancelTableDrag() {
@@ -1458,48 +1451,40 @@ function updateGlobalStats() {
     document.getElementById('global-stats').innerText = `已排位: ${assigned} / 總人數: ${total}`;
 }
 
+function collectPoolBySide(side) {
+    const groups = {};
+    let count = 0;
+    unassignedPool.forEach((guest, index) => {
+        if (!guest || !guest.name) return;
+        const isMatch = side === '男方' ? guest.side === '男方' : guest.side !== '男方';
+        if (!isMatch) return;
+        count++;
+        const gName = getPrimaryGroup(guest);
+        if (!groups[gName]) groups[gName] = [];
+        groups[gName].push({ data: guest, originalIndex: index });
+    });
+    return { groups, count };
+}
+
+function renderSidePool(container, groups, count, emptyMessage) {
+    container.innerHTML = '';
+    if (count === 0) {
+        container.innerHTML = `<div class="text-center text-slate-400 text-sm py-4 font-medium">${emptyMessage}</div>`;
+    } else {
+        renderGroupData(groups, container);
+    }
+}
+
 // 🎯 核心渲染更新：緊貼式上下結構
 function renderSidebar() {
     const maleContainer = document.getElementById('pool-male');
     const femaleContainer = document.getElementById('pool-female');
     if (!maleContainer || !femaleContainer) return;
-    
-    maleContainer.innerHTML = '';
-    femaleContainer.innerHTML = '';
 
-    let maleGroups = {};
-    let femaleGroups = {};
-    let maleCount = 0;
-    let femaleCount = 0;
-
-    unassignedPool.forEach((guest, index) => {
-        if (!guest || !guest.name) return;
-        const gName = getPrimaryGroup(guest);
-        
-        if (guest.side === '男方') {
-            maleCount++;
-            if (!maleGroups[gName]) maleGroups[gName] = [];
-            maleGroups[gName].push({ data: guest, originalIndex: index });
-        } else {
-            femaleCount++;
-            if (!femaleGroups[gName]) femaleGroups[gName] = [];
-            femaleGroups[gName].push({ data: guest, originalIndex: index });
-        }
-    });
-
-    // 渲染男方段落
-    if (maleCount === 0) {
-        maleContainer.innerHTML = `<div class="text-center text-slate-400 text-sm py-4 font-medium">🎉 男方已全數安排</div>`;
-    } else {
-        renderGroupData(maleGroups, maleContainer);
-    }
-
-    // 渲染女方段落 (自動貼在男方下面)
-    if (femaleCount === 0) {
-        femaleContainer.innerHTML = `<div class="text-center text-slate-400 text-sm py-4 font-medium">🎉 女方已全數安排</div>`;
-    } else {
-        renderGroupData(femaleGroups, femaleContainer);
-    }
+    const male = collectPoolBySide('男方');
+    const female = collectPoolBySide('女方');
+    renderSidePool(maleContainer, male.groups, male.count, '🎉 男方已全數安排');
+    renderSidePool(femaleContainer, female.groups, female.count, '🎉 女方已全數安排');
 }
 
 function renderGroupData(groups, container) {
@@ -1513,30 +1498,18 @@ function renderGroupData(groups, container) {
 
         groups[groupName].forEach(item => {
             const chip = document.createElement('div');
-            chip.className = `pool-guest-chip text-sm p-2.5 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-grab active:cursor-grabbing ${item.data.side === '女方' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`;
+            const poolSide = tagChipSideClasses(item.data.side === '女方' ? '女方' : '男方').pool;
+            chip.className = `pool-guest-chip text-sm p-2.5 rounded-lg border text-center font-bold truncate transition-all hover:translate-y-[-1px] cursor-grab active:cursor-grabbing ${poolSide}`;
             chip.innerText = item.data.name;
+            const poolDragData = () => ({
+                fromTable: 'POOL',
+                index: item.originalIndex,
+                name: item.data.name
+            });
             if (IS_TOUCH_DEVICE) {
-                setupTouchDrag(chip, () => ({
-                    fromTable: 'POOL',
-                    index: item.originalIndex,
-                    name: item.data.name
-                }), { closeSidebarOnLeave: true });
+                setupTouchDrag(chip, poolDragData, { closeSidebarOnLeave: true });
             } else {
-                chip.setAttribute('draggable', 'true');
-                chip.addEventListener('dragstart', (e) => {
-                    e.stopPropagation();
-                    cancelTableDrag();
-                    isGuestDragging = true;
-                    e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: "POOL", index: item.originalIndex, name: item.data.name }));
-                });
-                chip.addEventListener('drag', (e) => {
-                    openSidebarIfDragEntersSidebar(e.clientX);
-                    closeSidebarIfDragLeavesSidebar(e.clientX);
-                });
-                chip.addEventListener('dragend', () => {
-                    isGuestDragging = false;
-                    cancelTableDrag();
-                });
+                setupDesktopGuestDrag(chip, poolDragData, { trackSidebarLeave: true });
             }
 
             bindGuestTap(chip, () => {
@@ -1629,33 +1602,15 @@ function renderCanvasTables() {
                     openGuestModal(guest, tableNum, i);
                 });
 
+                const seatDragData = () => ({
+                    fromTable: tableNum,
+                    seatIndex: i,
+                    name: guest.name
+                });
                 if (IS_TOUCH_DEVICE) {
-                    setupTouchDrag(seatSlot, () => ({
-                        fromTable: tableNum,
-                        seatIndex: i,
-                        name: guest.name
-                    }));
+                    setupTouchDrag(seatSlot, seatDragData);
                 } else {
-                    seatSlot.setAttribute('draggable', 'true');
-                    seatSlot.addEventListener('pointerdown', (e) => {
-                        if (e.button !== 0) return;
-                        e.stopPropagation();
-                        cancelTableDrag();
-                        isGuestDragging = true;
-                    });
-                    seatSlot.addEventListener('dragstart', (e) => {
-                        e.stopPropagation();
-                        cancelTableDrag();
-                        isGuestDragging = true;
-                        e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: tableNum, seatIndex: i, name: guest.name }));
-                    });
-                    seatSlot.addEventListener('drag', (e) => {
-                        openSidebarIfDragEntersSidebar(e.clientX);
-                    });
-                    seatSlot.addEventListener('dragend', () => {
-                        isGuestDragging = false;
-                        cancelTableDrag();
-                    });
+                    setupDesktopGuestDrag(seatSlot, seatDragData, { pointerDown: true });
                 }
             } else {
                 seatSlot.className = 'seat-slot seat-empty';
@@ -1783,7 +1738,7 @@ function saveGuestChangesAction() {
     }
 
     const tableIdx = parseInt(tableNum);
-    const foundIdx = allGuests[tableIdx].findIndex(g => g && g.sort === (seatIdx + 1));
+    const foundIdx = findGuestBySeat(tableIdx, seatIdx);
     if (foundIdx !== -1) {
         allGuests[tableIdx][foundIdx].name = newName;
         allGuests[tableIdx][foundIdx].group = newGroup;
@@ -1801,20 +1756,16 @@ function removeGuestFromSeatAction() {
     const { tableNum, seatIdx } = selectedGuestContext;
     const tableIdx = parseInt(tableNum);
 
-    const foundIdx = allGuests[tableIdx].findIndex(g => g && g.sort === (seatIdx + 1));
+    const foundIdx = findGuestBySeat(tableIdx, seatIdx);
     if (foundIdx !== -1) {
         let guestObj = allGuests[tableIdx][foundIdx];
         allGuests[tableIdx].splice(foundIdx, 1);
-        guestObj.sort = 99; 
+        guestObj.sort = 99;
 
         if (!unassignedPool) unassignedPool = [];
         unassignedPool.push(guestObj);
 
-        const updates = {};
-        updates['wedding_guests'] = allGuests;
-        updates['unassigned_guests'] = unassignedPool;
-        
-        database.ref().update(updates).then(() => { closeGuestModal(); });
+        persistGuestState().then(() => closeGuestModal());
     }
 }
 
