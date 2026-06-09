@@ -1139,8 +1139,14 @@ function printCanvasView() {
 }
 
 function getPrintNameColumnCount(guestCount) {
-    if (guestCount <= 8) return 2;
+    if (guestCount <= 4) return 1;
+    if (guestCount <= 10) return 2;
     return 3;
+}
+
+function getPrintTextFontSize(tableSize, guestCount) {
+    const base = tableSize * (guestCount <= 4 ? 0.055 : guestCount <= 8 ? 0.048 : 0.04);
+    return Math.max(11, Math.min(20, Math.round(base)));
 }
 
 function buildGuestCirclePrintHTML() {
@@ -1158,47 +1164,43 @@ function buildGuestCirclePrintHTML() {
         (sheetW - pad * 2) / spanW,
         (sheetH - pad * 2) / spanH
     ));
-    const innerW = spanW + pad * 2;
-    const innerH = spanH + pad * 2;
-    const scaledW = innerW * fitScale;
-    const scaledH = innerH * fitScale;
-    const offsetX = (sheetW - scaledW) / 2;
-    const offsetY = (sheetH - scaledH) / 2;
+    const floorW = spanW * fitScale;
+    const floorH = spanH * fitScale;
+    const offsetX = (sheetW - floorW) / 2;
+    const offsetY = (sheetH - floorH) / 2;
 
     const sortedTableNums = Object.keys(tableSettings).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
 
     const circles = sortedTableNums.map(tableNum => {
         const settings = tableSettings[tableNum];
         const idx = parseInt(tableNum, 10);
-        const left = (settings.x - bounds.minX) + pad;
-        const top = (settings.y - bounds.minY) + pad;
-        const size = TABLE_DIM;
+        const left = (settings.x - bounds.minX) * fitScale;
+        const top = (settings.y - bounds.minY) * fitScale;
+        const size = TABLE_DIM * fitScale;
         const guests = (allGuests[idx] || [])
             .filter(g => g && g.name)
             .sort((a, b) => (a.sort || 99) - (b.sort || 99));
         const colCount = getPrintNameColumnCount(guests.length);
-        const fontSize = Math.max(9, Math.min(13, size * 0.032));
-        const titleSize = Math.max(10, Math.min(15, size * 0.05));
-        const titleH = 22;
-        const borderW = 1.8;
+        const fontSize = getPrintTextFontSize(size, guests.length);
+        const titleSize = Math.max(12, Math.min(20, Math.round(size * 0.06)));
+        const titleH = Math.max(16, Math.round(size * 0.07));
+        const borderW = Math.max(1.5, fitScale * 2);
         const names = guests.length
             ? guests.map(g => `<span class="print-name-item">${escapeHtml(g.name)}</span>`).join('')
             : '<span class="print-empty">—</span>';
 
         return `
             <div class="print-table-unit" style="left:${left}px;top:${top}px;width:${size}px">
-                <div class="print-table-title" style="font-size:${titleSize}px;height:${titleH}px">第 ${tableNum} 桌</div>
+                <div class="print-table-title" style="font-size:${titleSize}px;height:${titleH}px;line-height:${titleH}px">第 ${tableNum} 桌</div>
                 <div class="print-table-circle" style="width:${size}px;height:${size}px;border-width:${borderW}px">
-                    <div class="print-name-grid" style="column-count:${colCount};font-size:${fontSize}px">${names}</div>
+                    <div class="print-name-grid" style="column-count:${colCount};font-size:${fontSize}px;line-height:1.25">${names}</div>
                 </div>
             </div>
         `;
     }).join('');
 
     return `<div class="print-floor" style="width:${sheetW}px;height:${sheetH}px;overflow:hidden">
-        <div class="print-tables-scale-group" style="left:${offsetX}px;top:${offsetY}px;width:${innerW}px;height:${innerH}px;transform:scale(${fitScale});transform-origin:top left">
-            <div class="print-floor-inner" style="position:relative;width:${spanW}px;height:${spanH}px;left:${pad}px;top:${pad}px">${circles}</div>
-        </div>
+        <div class="print-floor-inner" style="position:relative;width:${floorW}px;height:${floorH}px;left:${offsetX}px;top:${offsetY}px">${circles}</div>
     </div>`;
 }
 
