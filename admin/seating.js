@@ -562,7 +562,7 @@ function escapeHtml(text) {
 
 function splitCJKNameEvenly(text) {
     const len = text.length;
-    if (len <= 3) return escapeHtml(text);
+    if (len <= 5) return escapeHtml(text);
     if (len === 6) return `${escapeHtml(text.slice(0, 3))}<br>${escapeHtml(text.slice(3))}`;
     if (len === 8) return `${escapeHtml(text.slice(0, 4))}<br>${escapeHtml(text.slice(4))}`;
     if (len === 10) return `${escapeHtml(text.slice(0, 5))}<br>${escapeHtml(text.slice(5))}`;
@@ -580,19 +580,92 @@ function isLatinGuestName(name) {
 }
 
 function splitLatinNameEvenly(text) {
-    const parts = text.trim().split(/\s+/);
+    const trimmed = text.trim();
+    const parts = trimmed.split(/\s+/);
+    const letterCount = trimmed.replace(/\s/g, '').length;
+    if (letterCount <= 10) return escapeHtml(trimmed);
     if (parts.length > 1) {
         const mid = Math.ceil(parts.length / 2);
         return `${escapeHtml(parts.slice(0, mid).join(' '))}<br>${escapeHtml(parts.slice(mid).join(' '))}`;
     }
     const word = parts[0];
-    if (word.length <= 7) return escapeHtml(word);
+    if (word.length <= 10) return escapeHtml(word);
     const half = Math.ceil(word.length / 2);
     return `${escapeHtml(word.slice(0, half))}<br>${escapeHtml(word.slice(half))}`;
 }
 
 function getGuestNameTextClass(name) {
     return isLatinGuestName(name) ? 'guest-name-text name-latn' : 'guest-name-text name-cjk';
+}
+
+const GUEST_NAME_FONT_RATIO_MIN = 0.145;
+// 字體上限 ≈ 3 個中文字（如「二姑姐」）— 單字放大但唔會頂晒個圓
+const GUEST_NAME_FONT_RATIO_REF_CHARS = 3.15;
+const GUEST_NAME_PADDING = 6;
+const GUEST_NAME_CIRCLE_INSET = 0.9;
+
+function getGuestNameInnerSize(guestSize) {
+    return (guestSize - GUEST_NAME_PADDING) * GUEST_NAME_CIRCLE_INSET;
+}
+
+function getGuestNameFontRatioCap(guestSize) {
+    const inner = getGuestNameInnerSize(guestSize);
+    return inner / (guestSize * GUEST_NAME_FONT_RATIO_REF_CHARS);
+}
+
+function noBreakSpaces(text) {
+    return escapeHtml(text).replace(/ /g, '&nbsp;');
+}
+
+function formatAttachSubline(text) {
+    return `<span class="name-subline">${noBreakSpaces(text)}</span>`;
+}
+
+function isCJKOnlyText(text) {
+    return /^[\u4e00-\u9fff]+$/.test((text || '').replace(/\s/g, ''));
+}
+
+function formatCJKMainPart(mainPart) {
+    const parts = mainPart.trim().split(/\s+/);
+    if (parts.length === 2 && parts.every(p => /^[\u4e00-\u9fff]+$/.test(p))) {
+        return `${escapeHtml(parts[0])}<br>${escapeHtml(parts[1])}`;
+    }
+    const cjkMain = mainPart.replace(/\s/g, '');
+    if (isCJKOnlyText(cjkMain)) {
+        if (cjkMain.length <= 5) return escapeHtml(mainPart);
+        return splitCJKNameEvenly(cjkMain);
+    }
+    return escapeHtml(mainPart);
+}
+
+function measureGuestNameFontRatio(circle) {
+    const guestSize = parseFloat(getComputedStyle(circle).getPropertyValue('--guest-size')) || 64;
+    const textSpan = circle.querySelector('.guest-name-text');
+    if (!textSpan) return 0.19;
+
+    const zoomVal = parseFloat(getComputedStyle(canvas).getPropertyValue('--zoom')) || 1;
+    const inner = getGuestNameInnerSize(guestSize) * zoomVal;
+    let lo = GUEST_NAME_FONT_RATIO_MIN;
+    let hi = getGuestNameFontRatioCap(guestSize);
+    const prevFontSize = circle.style.fontSize;
+
+    while (hi - lo > 0.003) {
+        const mid = (lo + hi) / 2;
+        circle.style.fontSize = `${guestSize * mid * zoomVal}px`;
+        const fits = textSpan.scrollWidth <= inner + 1 && textSpan.scrollHeight <= inner + 1;
+        if (fits) lo = mid;
+        else hi = mid;
+    }
+
+    circle.style.fontSize = prevFontSize;
+    return Math.max(GUEST_NAME_FONT_RATIO_MIN, lo);
+}
+
+function fitAllGuestNameFonts() {
+    document.querySelectorAll('.guest-seat-circle').forEach(circle => {
+        const ratio = measureGuestNameFontRatio(circle);
+        circle.style.setProperty('--name-font-ratio', ratio.toFixed(4));
+    });
 }
 
 function normalizeAttachLabel(text) {
@@ -607,12 +680,12 @@ function formatGuestDisplayName(name) {
     const trimmed = (name || '').trim();
     if (!trimmed) return '';
 
-    // 「靚女姑姐 *3 眷屬1」→ 兩行：靚女姑姐 / *3 眷屬 1
+    // 「靚女姑姐 *3 眷屬1」→ 兩行：靚女姑姐 / *3 眷屬 1（第二行唔再拆）
     const starAttach = trimmed.match(/^(.+?)\s*(\*\d+)\s*(眷屬\s*[\d０-９]+)\s*$/u);
     if (starAttach) {
         const star = starAttach[2];
         const attach = normalizeAttachLabel(starAttach[3]);
-        return `${escapeHtml(starAttach[1].trim())}<br>${escapeHtml(star)} ${escapeHtml(attach)}`;
+        return `${escapeHtml(starAttach[1].trim())}<br>${formatAttachSubline(`${star} ${attach}`)}`;
     }
 
     const attachMatch = trimmed.match(/^(.+?)\s*(眷屬\s*[\d０-９]+.*)$/u);
@@ -627,15 +700,11 @@ function formatGuestDisplayName(name) {
     if (starInMain && attachPart) {
         const star = starInMain[2];
         const attach = normalizeAttachLabel(attachPart);
-        return `${escapeHtml(starInMain[1].trim())}<br>${escapeHtml(star)} ${escapeHtml(attach)}`;
+        return `${escapeHtml(starInMain[1].trim())}<br>${formatAttachSubline(`${star} ${attach}`)}`;
     }
 
     if (attachPart) {
-        const cjkMain = mainPart.replace(/\s/g, '');
-        const nameHtml = /^[\u4e00-\u9fff]+$/.test(cjkMain) && cjkMain.length > 5
-            ? splitCJKNameEvenly(cjkMain)
-            : escapeHtml(mainPart);
-        return `${nameHtml}<br>${escapeHtml(normalizeAttachLabel(attachPart))}`;
+        return `${formatCJKMainPart(mainPart)}<br>${formatAttachSubline(normalizeAttachLabel(attachPart))}`;
     }
 
     const cjkOnly = trimmed.replace(/\s/g, '');
@@ -653,10 +722,20 @@ function formatGuestDisplayName(name) {
         if (combo) {
             const starAttachTail = combo[2].match(/^(\*\d+)\s*(眷屬\s*[\d０-９]+.*)$/u);
             if (starAttachTail) {
-                return `${escapeHtml(combo[1].trim())}<br>${escapeHtml(starAttachTail[1])} ${escapeHtml(normalizeAttachLabel(starAttachTail[2]))}`;
+                return `${escapeHtml(combo[1].trim())}<br>${formatAttachSubline(`${starAttachTail[1]} ${normalizeAttachLabel(starAttachTail[2])}`)}`;
             }
         }
-        return trimmed.split(/\s+/).map(escapeHtml).join('<br>');
+        const parts = trimmed.split(/\s+/);
+        if (parts.length === 2 && parts.every(p => /^[\u4e00-\u9fff]+$/.test(p))) {
+            return `${escapeHtml(parts[0])}<br>${escapeHtml(parts[1])}`;
+        }
+        const compactLen = trimmed.replace(/\s/g, '').length;
+        if (compactLen <= 5) return escapeHtml(trimmed);
+        if (compactLen === 6 && parts.every(p => /^[\u4e00-\u9fff]+$/.test(p))) {
+            return splitCJKNameEvenly(trimmed.replace(/\s/g, ''));
+        }
+        if (isLatinGuestName(trimmed)) return splitLatinNameEvenly(trimmed);
+        return parts.map(escapeHtml).join('<br>');
     }
 
     return escapeHtml(trimmed);
@@ -755,6 +834,9 @@ function toggleSidebar() {
     }
 }
 
+const TABLE_LOCK_KEY = 'seating_tables_locked';
+let isTablePositionLocked = localStorage.getItem(TABLE_LOCK_KEY) === '1';
+
 function updateTableLockUI() {
     const btn = document.getElementById('btn-lock-tables');
     if (!btn) return;
@@ -794,123 +876,175 @@ document.addEventListener('click', (e) => {
     if (!e.target.closest('#print-menu-wrap')) closePrintMenu();
 });
 
+let printPreviewCleanup = null;
+
+function saveViewState() {
+    return { panX, panY, zoom, sidebarOpen: isSidebarOpen };
+}
+
+function restoreViewState(saved) {
+    if (!saved) return;
+    panX = saved.panX;
+    panY = saved.panY;
+    zoom = saved.zoom;
+    applyTransform();
+    if (saved.sidebarOpen) openSidebar();
+    else closeSidebar({ instant: true });
+}
+
+function waitFrames(count = 2) {
+    return new Promise(resolve => {
+        let left = count;
+        const tick = () => {
+            left -= 1;
+            if (left <= 0) resolve();
+            else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    });
+}
+
+function fitViewToAllTablesForPrint() {
+    const bounds = getTablesBoundingBox();
+    if (!bounds) return;
+
+    const groupW = bounds.maxX - bounds.minX;
+    const groupH = bounds.maxY - bounds.minY;
+    const vpRect = viewport.getBoundingClientRect();
+    const padding = 56;
+    const zoomX = vpRect.width / (groupW + padding * 2);
+    const zoomY = vpRect.height / (groupH + padding * 2);
+
+    zoom = Math.min(1.15, Math.max(0.1, Math.min(zoomX, zoomY)));
+    panX = (vpRect.width / 2) - bounds.centerX * zoom;
+    panY = (vpRect.height / 2) - bounds.centerY * zoom;
+    applyTransform();
+}
+
+function showPrintPreview(contentHTML, cleanup) {
+    const sheet = document.getElementById('print-preview-sheet');
+    const overlay = document.getElementById('print-preview-overlay');
+    if (!sheet || !overlay) return;
+
+    if (printPreviewCleanup) printPreviewCleanup();
+    printPreviewCleanup = cleanup || null;
+
+    sheet.innerHTML = contentHTML;
+    document.body.classList.add('print-preview-open');
+    overlay.classList.remove('hidden');
+    document.getElementById('print-preview-scroll')?.scrollTo(0, 0);
+}
+
+function closePrintPreview() {
+    const overlay = document.getElementById('print-preview-overlay');
+    if (printPreviewCleanup) {
+        printPreviewCleanup();
+        printPreviewCleanup = null;
+    }
+    document.body.classList.remove('print-preview-open');
+    overlay?.classList.add('hidden');
+    const sheet = document.getElementById('print-preview-sheet');
+    if (sheet) sheet.innerHTML = '';
+}
+
+function executePrintPreview() {
+    window.print();
+}
+
 async function printCanvasView() {
     closePrintMenu();
     if (typeof html2canvas === 'undefined') {
         alert('❌ 打印組件尚未載入，請重新整理頁面後再試。');
         return;
     }
-    const target = document.getElementById('canvas-viewport');
+
+    const saved = saveViewState();
+    const wasSidebarOpen = isSidebarOpen;
+    if (wasSidebarOpen) closeSidebar({ instant: true });
+
     const ghost = document.querySelector('.guest-drag-ghost');
     if (ghost) ghost.style.visibility = 'hidden';
 
     try {
-        const shot = await html2canvas(target, {
+        fitViewToAllTablesForPrint();
+        await waitFrames(3);
+
+        const shot = await html2canvas(viewport, {
             backgroundColor: '#f1f5f9',
             scale: Math.min(2, window.devicePixelRatio || 1.5),
             useCORS: true,
             logging: false,
-            ignoreElements: (el) => el.classList?.contains('guest-drag-ghost')
+            ignoreElements: (el) => el.classList?.contains('guest-drag-ghost') || el.id === 'sidebar-panel'
         });
-        openPrintWindow(
-            '排位畫面',
-            `<img src="${shot.toDataURL('image/png')}" alt="排位畫面" style="max-width:100%;height:auto;display:block;margin:0 auto;">`,
-            'img { max-width: 100%; height: auto; } body { margin: 0; padding: 0; text-align: center; }'
+
+        showPrintPreview(
+            `<img src="${shot.toDataURL('image/png')}" alt="排位畫面" class="print-canvas-shot">`,
+            () => restoreViewState(saved)
         );
     } catch (err) {
         console.error(err);
+        restoreViewState(saved);
         alert('❌ 打印畫面失敗，請稍後再試。');
     } finally {
         if (ghost) ghost.style.visibility = '';
     }
 }
 
-function buildGuestListPrintHTML() {
-    const sortedTableNums = Object.keys(tableSettings).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
-    if (!sortedTableNums.length) {
-        return '<p class="empty">目前沒有任何枱位資料。</p>';
-    }
+function getPrintNameColumnCount(guestCount) {
+    if (guestCount <= 8) return 2;
+    return 3;
+}
 
-    return sortedTableNums.map(tableNum => {
+function buildGuestCirclePrintHTML() {
+    const bounds = getTablesBoundingBox();
+    if (!bounds) return '<p class="print-empty">目前沒有任何枱位資料。</p>';
+
+    const sheetW = 1040;
+    const sheetH = 700;
+    const pad = 28;
+    const spanW = bounds.maxX - bounds.minX;
+    const spanH = bounds.maxY - bounds.minY;
+    const scale = Math.min((sheetW - pad * 2) / spanW, (sheetH - pad * 2) / spanH);
+    const floorW = spanW * scale;
+    const floorH = spanH * scale;
+    const titleH = 22 * scale;
+
+    const sortedTableNums = Object.keys(tableSettings).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+
+    const circles = sortedTableNums.map(tableNum => {
         const settings = tableSettings[tableNum];
         const idx = parseInt(tableNum, 10);
-        const label = (settings.label || '').trim();
+        const left = (settings.x - bounds.minX) * scale;
+        const top = (settings.y - bounds.minY) * scale;
+        const size = TABLE_DIM * scale;
         const guests = (allGuests[idx] || [])
             .filter(g => g && g.name)
             .sort((a, b) => (a.sort || 99) - (b.sort || 99));
+        const colCount = getPrintNameColumnCount(guests.length);
+        const fontSize = Math.max(7.5, Math.min(11.5, size * 0.026));
+        const titleSize = Math.max(9, Math.min(14, size * 0.048));
+        const borderW = Math.max(1.5, scale * 1.8);
+        const names = guests.length
+            ? guests.map(g => `<span class="print-name-item">${escapeHtml(g.name)}</span>`).join('')
+            : '<span class="print-empty">—</span>';
 
-        const title = `第 ${tableNum} 桌${label ? ` — ${escapeHtml(label)}` : ''}`;
-        const list = guests.length
-            ? `<ol>${guests.map(g => {
-                const sideTag = g.side === '女方' ? '女方' : '男方';
-                return `<li><span class="name">${escapeHtml(g.name)}</span><span class="side side-${sideTag === '女方' ? 'female' : 'male'}">${sideTag}</span></li>`;
-            }).join('')}</ol>`
-            : '<p class="empty-seat">（暫無賓客）</p>';
-
-        return `<section class="table-block"><h2>${title}</h2><div class="count">${guests.length} 位</div>${list}</section>`;
+        return `
+            <div class="print-table-unit" style="left:${left}px;top:${top}px;width:${size}px">
+                <div class="print-table-title" style="font-size:${titleSize}px;height:${titleH}px">第 ${tableNum} 桌</div>
+                <div class="print-table-circle" style="width:${size}px;height:${size}px;border-width:${borderW}px">
+                    <div class="print-name-grid" style="column-count:${colCount};font-size:${fontSize}px">${names}</div>
+                </div>
+            </div>
+        `;
     }).join('');
+
+    return `<div class="print-floor" style="width:${floorW}px;height:${floorH + titleH}px">${circles}</div>`;
 }
 
 function printGuestListView() {
     closePrintMenu();
-    const body = buildGuestListPrintHTML();
-    const styles = `
-        body { font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif; color: #1e293b; margin: 0; padding: 16px; }
-        h1 { font-size: 18px; margin: 0 0 12px; text-align: center; }
-        .meta { text-align: center; font-size: 11px; color: #64748b; margin-bottom: 16px; }
-        .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-        .table-block { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; break-inside: avoid; page-break-inside: avoid; }
-        .table-block h2 { font-size: 14px; margin: 0 0 4px; }
-        .count { font-size: 11px; color: #64748b; margin-bottom: 6px; }
-        ol { margin: 0; padding-left: 1.2rem; }
-        li { font-size: 13px; line-height: 1.45; margin: 2px 0; }
-        .name { font-weight: 700; }
-        .side { font-size: 11px; margin-left: 6px; color: #64748b; }
-        .side-female { color: #be123c; }
-        .side-male { color: #1d4ed8; }
-        .empty, .empty-seat { font-size: 12px; color: #94a3b8; margin: 0; }
-        @media print {
-            body { padding: 8mm; }
-            .grid { gap: 8px; }
-        }
-        @media (max-width: 640px) {
-            .grid { grid-template-columns: 1fr; }
-        }
-    `;
-    const now = new Date().toLocaleString('zh-HK');
-    openPrintWindow(
-        '枱上賓客名單',
-        `<h1>婚宴枱上賓客名單</h1><p class="meta">列印時間：${escapeHtml(now)}</p><div class="grid">${body}</div>`,
-        styles
-    );
+    showPrintPreview(buildGuestCirclePrintHTML());
 }
-
-function openPrintWindow(title, bodyHTML, extraCSS = '') {
-    const printWin = window.open('', '_blank');
-    if (!printWin) {
-        alert('❌ 請允許彈出視窗以進行打印。');
-        return;
-    }
-    printWin.document.write(`<!DOCTYPE html>
-<html lang="zh-Hant-HK"><head>
-<meta charset="UTF-8"><title>${escapeHtml(title)}</title>
-<style>${extraCSS}</style>
-</head><body>${bodyHTML}</body></html>`);
-    printWin.document.close();
-    printWin.focus();
-    printWin.onload = () => {
-        printWin.print();
-        printWin.onafterprint = () => printWin.close();
-    };
-    setTimeout(() => {
-        if (!printWin.closed) {
-            printWin.print();
-        }
-    }, 400);
-}
-
-const TABLE_LOCK_KEY = 'seating_tables_locked';
-let isTablePositionLocked = localStorage.getItem(TABLE_LOCK_KEY) === '1';
 
 let isDraggingTable = false;
 let draggedTableElement = null;
@@ -1458,6 +1592,8 @@ function renderCanvasTables() {
         tableWrapper.appendChild(tablePlate);
         canvas.appendChild(tableWrapper);
     });
+
+    requestAnimationFrame(() => fitAllGuestNameFonts());
 }
 
 function finishTableDrag() {

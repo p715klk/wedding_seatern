@@ -132,7 +132,7 @@
             justify-content: center;
             text-align: center;
             padding: calc(3px * var(--zoom));
-            font-size: calc(var(--guest-size, 64px) * 0.19 * var(--zoom));
+            font-size: calc(var(--guest-size, 64px) * var(--name-font-ratio, 0.19) * var(--zoom));
             font-weight: 700;
             cursor: grab;
             line-height: 1.1;
@@ -162,24 +162,30 @@
             cursor: default;
         }
         .guest-name-text {
-            display: block;
+            display: inline-block;
             overflow: hidden;
-            width: 100%;
-            max-width: calc((var(--guest-size, 64px) - 4px) * var(--zoom));
+            width: auto;
+            max-width: calc((var(--guest-size, 64px) - 6px) * var(--zoom));
             line-height: 1.1;
+            font-size: inherit;
+            vertical-align: middle;
         }
         .guest-name-text.name-cjk {
             word-break: keep-all;
         }
         .guest-name-text.name-latn {
-            word-break: break-word;
-            overflow-wrap: anywhere;
+            word-break: normal;
+            overflow-wrap: normal;
             letter-spacing: -0.02em;
+        }
+        .guest-name-text .name-subline {
+            white-space: nowrap;
+            display: inline-block;
+            max-width: 100%;
         }
 
         /* 電腦版加大字體（側欄 & 彈窗 & 枱上座位） */
         @media (min-width: 1024px) {
-            .guest-seat-circle { font-size: calc(var(--guest-size, 64px) * 0.21 * var(--zoom)); }
             .pool-guest-chip { font-size: 14px !important; padding: 10px 12px !important; }
             .pool-group-title { font-size: 13px !important; }
             .pool-section-label { font-size: 13px !important; }
@@ -272,6 +278,96 @@
             min-width: 11rem;
         }
 
+        /* 頁內列印預覽（唔開新分頁） */
+        #print-preview-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            flex-direction: column;
+            background: #e2e8f0;
+        }
+        body.print-preview-open #print-preview-overlay {
+            display: flex !important;
+        }
+        #print-preview-sheet {
+            background: #fff;
+            box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+        }
+        .print-canvas-shot {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+        .print-floor {
+            position: relative;
+            margin: 0 auto;
+        }
+        .print-table-unit {
+            position: absolute;
+            box-sizing: border-box;
+        }
+        .print-table-title {
+            text-align: center;
+            font-weight: 800;
+            color: #111;
+            line-height: 1.1;
+            margin-bottom: 0.35em;
+        }
+        .print-table-circle {
+            border: 2px solid #111;
+            border-radius: 50%;
+            background: #fff;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .print-name-grid {
+            width: 86%;
+            text-align: center;
+            line-height: 1.22;
+            color: #111;
+        }
+        .print-name-item {
+            display: block;
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+        .print-empty {
+            color: #94a3b8;
+        }
+
+        @media print {
+            body.print-preview-open #seating-app,
+            body.print-preview-open #guest-detail-modal,
+            body.print-preview-open #custom-dialog-overlay,
+            body.print-preview-open #table-settings-modal {
+                display: none !important;
+            }
+            body.print-preview-open #print-preview-overlay {
+                display: block !important;
+                position: static;
+                background: #fff;
+            }
+            body.print-preview-open .print-preview-toolbar {
+                display: none !important;
+            }
+            body.print-preview-open #print-preview-scroll {
+                overflow: visible !important;
+                padding: 0 !important;
+                background: #fff !important;
+            }
+            body.print-preview-open #print-preview-sheet {
+                box-shadow: none !important;
+                margin: 0 !important;
+            }
+            @page {
+                size: landscape;
+                margin: 10mm;
+            }
+        }
+
         @media (max-width: 768px) {
             #sidebar-panel { width: min(88vw, 300px); }
             #sidebar-content { width: min(88vw, 300px) !important; }
@@ -282,7 +378,9 @@
         }
     </style>
 </head>
-<body class="seating-touch bg-slate-900 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
+<body class="seating-touch bg-slate-900 text-slate-800 font-sans h-screen overflow-hidden">
+
+<div id="seating-app" class="h-full flex flex-col overflow-hidden">
 
     <header class="bg-white text-slate-800 h-14 px-4 shadow-sm flex justify-between items-center shrink-0 border-b border-slate-200 z-30">
         <div class="flex items-center gap-3">
@@ -311,8 +409,8 @@
                     🖨️<span class="hide-mobile"> 打印</span>
                 </button>
                 <div id="print-menu" class="hidden absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-xs font-bold overflow-hidden">
-                    <button type="button" onclick="printCanvasView()" class="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700">🖼️ 打印畫面（目前視野）</button>
-                    <button type="button" onclick="printGuestListView()" class="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700 border-t border-slate-100">📋 打印枱上名單（文字）</button>
+                    <button type="button" onclick="printCanvasView()" class="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700">🖼️ 打印畫面（全部枱位）</button>
+                    <button type="button" onclick="printGuestListView()" class="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700 border-t border-slate-100">📋 打印圓枱名單（文字版）</button>
                 </div>
             </div>
             <a href="admin.html" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition">
@@ -355,6 +453,8 @@
         </aside>
 
     </div>
+
+</div>
 
     <div id="guest-detail-modal" class="fixed inset-0 bg-slate-950/40 z-50 hidden items-center justify-center p-4">
         <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-slate-100">
@@ -432,6 +532,17 @@
                     <button onclick="saveTableSettingsAction()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-bold">儲存</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div id="print-preview-overlay" class="hidden">
+        <div class="print-preview-toolbar h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0">
+            <button type="button" onclick="closePrintPreview()" class="text-sm font-bold text-slate-600 hover:text-slate-900">← 返回畫布</button>
+            <span class="text-sm font-black text-slate-800">列印預覽</span>
+            <button type="button" onclick="executePrintPreview()" class="bg-amber-800 hover:bg-amber-900 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm">列印</button>
+        </div>
+        <div id="print-preview-scroll" class="flex-1 overflow-auto p-6 flex justify-center items-start min-h-0">
+            <div id="print-preview-sheet" class="p-4"></div>
         </div>
     </div>
 
