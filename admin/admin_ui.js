@@ -40,6 +40,35 @@ function buildTagAddSelectHTML(columnKey, selectedTags) {
     return `<select onchange="handleTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border border-red-200 bg-red-50/20 rounded px-1 py-0.5 font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
 }
 
+function buildTableInputHTML(value = '') {
+    const valAttr = value ? `value="${value}"` : '';
+    return `
+        <div class="row-table-wrap">
+            <input type="number" min="1" max="99" placeholder="—" ${valAttr}
+                   oninput="recalculateSortNumbersFromDOM()"
+                   class="row-table-input font-mono font-bold bg-transparent focus:outline-none">
+            <div class="row-table-spin-btns">
+                <button type="button" tabindex="-1" onclick="stepTableInput(this, 1)" class="row-table-spin-up" aria-label="增加桌號">▲</button>
+                <button type="button" tabindex="-1" onclick="stepTableInput(this, -1)" class="row-table-spin-down" aria-label="減少桌號">▼</button>
+            </div>
+        </div>
+    `;
+}
+
+function stepTableInput(btn, delta) {
+    const input = btn.closest('.row-table-wrap').querySelector('.row-table-input');
+    if (!input) return;
+    let v = parseInt(input.value, 10);
+    if (isNaN(v)) {
+        if (delta > 0) v = 1;
+        else return;
+    } else {
+        v = Math.min(99, Math.max(1, v + delta));
+    }
+    input.value = v;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function buildMultiTagCellHTML(columnKey, tags) {
     const chips = tags.map(t => buildTagChipHTML(t, columnKey)).join('');
     return `
@@ -161,10 +190,10 @@ function renderThead() {
     if (!theadTr) return;
 
     let html = '';
-    html += thCell('序', colWidthByText('99', { min: 24, max: 28, pad: 14, charW: 10 }), { className: 'text-sm font-bold text-gray-500' });
-    html += thCell('☰', colWidthByText('☰', { min: 24, max: 28, pad: 14, charW: 10 }), { className: 'text-sm font-bold text-gray-500' });
-    html += thCell('桌', colWidthByText('分配桌次', { min: 40, max: 60 }));
-    html += thCell('桌次座位', colWidthByText('第 99 桌 - 第 99 位', { min: 88, max: 100 }), { align: 'left' });
+    html += thCell('順序', colWidthByText('99', { min: 24, max: 28, pad: 14, charW: 10 }), { className: 'text-sm font-bold text-gray-500' });
+    html += thCell('拖動', colWidthByText('☰', { min: 24, max: 28, pad: 14, charW: 10 }), { className: 'text-sm font-bold text-gray-500' });
+    html += thCell('桌號', colWidthByText('分配桌次', { min: 40, max: 50 }));
+    html += thCell('桌次座位', colWidthByText('第 99 桌 - 第 99 位', { min: 88, max: 100 }), { align: 'center' });
     html += thCell('賓客姓名', colWidthByText('賓客姓名', { min: 128, max: 150 }), { align: 'left' });
     html += thCell('來源', colWidthByText('女方', { min: 50, max: 56, pad: 30 }));
 
@@ -200,11 +229,7 @@ function renderDOMRows() {
             </select>
         `;
 
-        const tableInputHTML = `
-            <input type="number" min="1" max="99" placeholder="未安排" value="${guest.table || ''}" 
-                   oninput="recalculateSortNumbersFromDOM()" 
-                   class="w-full border border-gray-200 rounded p-1 font-mono font-bold text-center bg-transparent focus:bg-white row-table-input">
-        `;
+        const tableInputHTML = buildTableInputHTML(guest.table || '');
 
         const tags = normalizeTags(guest[PRIMARY_TAG_KEY]);
         tags.forEach(t => {
@@ -216,7 +241,7 @@ function renderDOMRows() {
         tr.innerHTML = `
             <td class="py-2 px-1 text-center font-mono text-gray-400 font-bold row-sort-num row-sort-cell">${index + 1}</td>
             <td class="py-2 px-1 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize row-drag-cell">☰</td>
-            <td class="py-2 px-2">${tableInputHTML}</td>
+            <td class="py-2 px-1 row-table-cell">${tableInputHTML}</td>
             <td class="py-2 px-2 text-left font-mono font-bold text-gray-600 row-seat-txt-cell">第 <span class="row-table-display-num">${guest.table || '-'}</span> 桌 - 第 <span class="row-seat-num">${guest.table ? guest.sort : '-'}</span> 位</td>
             <td class="py-2 px-2">
                 <input type="text" value="${guest.name}" class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-name-input">
@@ -244,11 +269,7 @@ function addNewGuestRow() {
         </select>
     `;
 
-    const tableInputHTML = `
-        <input type="number" min="1" max="99" placeholder="未安排" value="" 
-               oninput="recalculateSortNumbersFromDOM()" 
-               class="w-full border border-gray-200 rounded p-1 font-mono font-bold text-center bg-transparent focus:bg-white row-table-input">
-    `;
+    const tableInputHTML = buildTableInputHTML();
 
     const labelsTdHTML = buildMultiTagCellHTML(PRIMARY_TAG_KEY, []);
 
@@ -257,7 +278,7 @@ function addNewGuestRow() {
     tr.innerHTML = `
         <td class="py-2 px-1 text-center font-mono text-gray-400 font-bold row-sort-num row-sort-cell">${nextIndex}</td>
         <td class="py-2 px-1 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize row-drag-cell">☰</td>
-        <td class="py-2 px-2">${tableInputHTML}</td>
+        <td class="py-2 px-1 row-table-cell">${tableInputHTML}</td>
         <td class="py-2 px-2 text-left font-mono font-bold text-gray-600 row-seat-txt-cell">未安排</td>
         <td class="py-2 px-2">
             <input type="text" value="" placeholder="請輸入姓名" class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-name-input">
