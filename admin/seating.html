@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>自製鷗鷗 - 視覺化高級排位畫布</title>
+    <title>自製鷗鷗 - 可視化圓枱排位畫布</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="admin_style.css">
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
@@ -387,7 +387,7 @@
     <header class="bg-white text-slate-800 h-14 px-4 shadow-sm flex justify-between items-center shrink-0 border-b border-slate-200 z-30">
         <div class="flex items-center gap-3">
             <h1 class="text-base font-black tracking-wider text-slate-900 flex items-center gap-1.5">
-                <span class="text-xl">🦢</span> SEATING OOO
+                <span class="text-xl">🦢</span> 可視化圓枱排位畫布
             </h1>
             <div class="text-[11px] bg-slate-100 px-2.5 py-1 rounded-full text-slate-600 font-bold" id="global-stats">載入中...</div>
         </div>
@@ -404,7 +404,7 @@
                 ➕ 新增圓枱
             </button>
             <button type="button" id="btn-lock-tables" onclick="toggleTablePositionLock()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition" title="鎖定枱位（防止拖動）">
-                🔓<span class="hide-mobile"> 枱位</span>
+                🔓<span class="hide-mobile"> 鎖枱</span>
             </button>
             <div class="relative" id="print-menu-wrap">
                 <button type="button" id="btn-print-menu" onclick="togglePrintMenu(event)" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition">

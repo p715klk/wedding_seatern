@@ -846,7 +846,7 @@ function updateTableLockUI() {
         btn.title = '枱位已鎖定，點擊解鎖';
         document.body.classList.add('tables-position-locked');
     } else {
-        btn.innerHTML = '🔓<span class="hide-mobile"> 枱位</span>';
+        btn.innerHTML = '🔓<span class="hide-mobile"> 鎖枱</span>';
         btn.classList.remove('is-active');
         btn.title = '鎖定枱位（防止拖動）';
         document.body.classList.remove('tables-position-locked');
