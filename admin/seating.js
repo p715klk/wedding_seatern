@@ -858,17 +858,75 @@ function toggleTablePositionLock() {
 
 function closePrintMenu() {
     const menu = document.getElementById('print-menu');
-    if (menu) menu.classList.add('hidden');
+    if (menu) {
+        menu.classList.add('hidden');
+        menu.classList.remove('is-fixed');
+        menu.style.top = '';
+        menu.style.right = '';
+        menu.style.left = '';
+    }
+}
+
+let printMenuIgnoreCloseUntil = 0;
+
+function positionPrintMenuFixed() {
+    const btn = document.getElementById('btn-print-menu');
+    const menu = document.getElementById('print-menu');
+    if (!btn || !menu) return;
+    const rect = btn.getBoundingClientRect();
+    menu.classList.add('is-fixed');
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+    menu.style.left = 'auto';
 }
 
 function togglePrintMenu(e) {
     e.stopPropagation();
+    e.preventDefault();
     const menu = document.getElementById('print-menu');
     if (!menu) return;
+    const willOpen = menu.classList.contains('hidden');
     menu.classList.toggle('hidden');
+    if (willOpen) {
+        printMenuIgnoreCloseUntil = Date.now() + 400;
+        if (isMobileViewport()) positionPrintMenuFixed();
+    } else {
+        closePrintMenu();
+    }
+}
+
+function initPrintMenu() {
+    const menu = document.getElementById('print-menu');
+    if (!menu || menu.dataset.bound === '1') return;
+    menu.dataset.bound = '1';
+
+    menu.querySelectorAll('button[data-print-action]').forEach(btn => {
+        let lastActionAt = 0;
+        const runAction = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (Date.now() - lastActionAt < 500) return;
+            lastActionAt = Date.now();
+            printMenuIgnoreCloseUntil = Date.now() + 400;
+            closePrintMenu();
+            const action = btn.dataset.printAction;
+            if (action === 'canvas') printCanvasView();
+            else if (action === 'guest-list') printGuestListView();
+        };
+
+        btn.addEventListener('click', runAction);
+        if (IS_TOUCH_DEVICE) {
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runAction(e);
+            }, { passive: false });
+        }
+    });
 }
 
 document.addEventListener('click', (e) => {
+    if (Date.now() < printMenuIgnoreCloseUntil) return;
     if (!e.target.closest('#print-menu-wrap')) closePrintMenu();
 });
 
@@ -876,6 +934,9 @@ let printPreviewCleanup = null;
 let printPreviewZoom = 1;
 let printPreviewOrientation = 'portrait';
 let printLayoutZoom = 1;
+let printPreviewBuilder = null;
+let printPreviewIsRaster = false;
+let printPreviewRasterToken = 0;
 const PRINT_ZOOM_STEP = 0.2;
 const PRINT_ZOOM_MIN = 0.2;
 const PRINT_ZOOM_MAX = 3;
@@ -919,7 +980,85 @@ function requireTablesBounds() {
 function openPrintPreview(buildHTML) {
     closePrintMenu();
     if (!requireTablesBounds()) return;
+    printPreviewBuilder = buildHTML;
+    if (isMobileViewport()) {
+        openPrintPreviewAsRaster(buildHTML);
+        return;
+    }
+    printPreviewIsRaster = false;
     showPrintPreview(buildHTML());
+}
+
+async function openPrintPreviewAsRaster(buildHTML) {
+    const overlay = document.getElementById('print-preview-overlay');
+    const sheet = document.getElementById('print-preview-sheet');
+    if (!overlay || !sheet) return;
+
+    const token = ++printPreviewRasterToken;
+    printPreviewIsRaster = true;
+    printPreviewZoom = 1;
+    document.body.dataset.printOrientation = printPreviewOrientation;
+    applyPrintPageStyle();
+    updatePrintOrientationUI();
+    document.body.classList.add('print-preview-open');
+    overlay.classList.remove('hidden');
+    sheet.innerHTML = '<div class="print-raster-loading">正在生成列印圖像…</div>';
+    document.getElementById('print-preview-scroll')?.scrollTo(0, 0);
+
+    try {
+        const imgHTML = await rasterizePrintToImageHTML(buildHTML);
+        if (token !== printPreviewRasterToken) return;
+        showPrintPreview(imgHTML, null, { preserveOpen: true });
+    } catch (err) {
+        console.error(err);
+        if (token !== printPreviewRasterToken) return;
+        alert('❌ 無法生成列印圖像，請稍後再試。');
+        closePrintPreview();
+    }
+}
+
+async function rasterizePrintToImageHTML(buildHTML) {
+    if (typeof html2canvas !== 'function') {
+        throw new Error('html2canvas unavailable');
+    }
+
+    const page = getPrintPageInnerSize();
+    const staging = document.createElement('div');
+    staging.className = 'print-raster-staging';
+    staging.style.cssText = [
+        'position:fixed',
+        'left:0',
+        'top:0',
+        'width:' + page.w + 'px',
+        'height:' + page.h + 'px',
+        'opacity:0',
+        'pointer-events:none',
+        'z-index:-1',
+        'overflow:hidden',
+        'background:#fff',
+        'box-sizing:border-box'
+    ].join(';');
+    staging.innerHTML = `<div id="print-preview-sheet" style="width:${page.w}px;height:${page.h}px;box-sizing:border-box;background:#fff;overflow:visible">${buildHTML()}</div>`;
+    document.body.appendChild(staging);
+
+    try {
+        if (document.fonts?.ready) await document.fonts.ready;
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        const target = staging.firstElementChild;
+        const snapshot = await html2canvas(target, {
+            backgroundColor: '#ffffff',
+            scale: 2,
+            width: page.w,
+            height: page.h,
+            useCORS: true,
+            logging: false
+        });
+        const dataUrl = snapshot.toDataURL('image/png');
+        return `<div class="print-image-layout" style="width:${page.w}px;height:${page.h}px"><img src="${dataUrl}" alt="列印預覽" width="${page.w}" height="${page.h}"></div>`;
+    } finally {
+        staging.remove();
+    }
 }
 
 function cloneTablePlateForPrint(plate) {
@@ -1019,31 +1158,32 @@ function setPrintOrientation(orientation) {
 
 function rebuildPrintPreviewContent() {
     const sheet = document.getElementById('print-preview-sheet');
-    if (!sheet || !document.body.classList.contains('print-preview-open')) return;
-    const savedZoom = printPreviewZoom;
-    if (sheet.querySelector('.print-tables-layout')) {
-        sheet.innerHTML = buildCanvasPrintHTML();
-    } else if (sheet.querySelector('.print-floor')) {
-        sheet.innerHTML = buildGuestCirclePrintHTML();
-    } else {
+    if (!sheet || !document.body.classList.contains('print-preview-open') || !printPreviewBuilder) return;
+    if (isMobileViewport()) {
+        openPrintPreviewAsRaster(printPreviewBuilder);
         return;
     }
+    const savedZoom = printPreviewZoom;
+    printPreviewIsRaster = false;
+    sheet.innerHTML = printPreviewBuilder();
     printPreviewZoom = savedZoom;
     requestAnimationFrame(() => applyPrintPreviewTransform());
 }
 
-function showPrintPreview(contentHTML, cleanup) {
+function showPrintPreview(contentHTML, cleanup, options = {}) {
     const sheet = document.getElementById('print-preview-sheet');
     const overlay = document.getElementById('print-preview-overlay');
     if (!sheet || !overlay) return;
 
-    if (printPreviewCleanup) printPreviewCleanup();
-    printPreviewCleanup = cleanup || null;
+    if (!options.preserveOpen && printPreviewCleanup) printPreviewCleanup();
+    if (!options.preserveOpen) printPreviewCleanup = cleanup || null;
 
-    printPreviewZoom = 1;
-    document.body.dataset.printOrientation = printPreviewOrientation;
-    applyPrintPageStyle();
-    updatePrintOrientationUI();
+    if (!options.preserveOpen) {
+        printPreviewZoom = 1;
+        document.body.dataset.printOrientation = printPreviewOrientation;
+        applyPrintPageStyle();
+        updatePrintOrientationUI();
+    }
 
     sheet.innerHTML = contentHTML;
     const viewport = document.getElementById('print-preview-viewport');
@@ -1058,11 +1198,14 @@ function showPrintPreview(contentHTML, cleanup) {
 }
 
 function closePrintPreview() {
+    printPreviewRasterToken += 1;
     const overlay = document.getElementById('print-preview-overlay');
     if (printPreviewCleanup) {
         printPreviewCleanup();
         printPreviewCleanup = null;
     }
+    printPreviewBuilder = null;
+    printPreviewIsRaster = false;
     document.body.classList.remove('print-preview-open');
     delete document.body.dataset.printOrientation;
     overlay?.classList.add('hidden');
@@ -1097,6 +1240,8 @@ function buildGuestCirclePrintHTML() {
     const page = getPrintPageInnerSize();
     const sheetW = page.w;
     const sheetH = page.h;
+    const spanW = bounds.maxX - bounds.minX;
+    const spanH = bounds.maxY - bounds.minY;
     const scale = computePrintFitScale(bounds);
     const floorW = spanW * scale;
     const floorH = spanH * scale;
@@ -1390,6 +1535,7 @@ function runRender() {
 function bootstrapSeatingView() {
     runRender();
     initMobileExperience();
+    initPrintMenu();
     updateTableLockUI();
     if (seatingViewBootstrapped) return;
     seatingViewBootstrapped = true;
