@@ -115,11 +115,12 @@ function collectGuestFromRow(row) {
 function initResizableColumns() {
     const ths = document.querySelectorAll('#excel-thead-tr th');
     ths.forEach(th => {
-        if (th.querySelector('.resizer')) return; 
+        if (th.querySelector('.col-resizer')) return;
 
         const resizer = document.createElement('div');
-        resizer.className = 'resizer';
-        th.style.position = 'relative';
+        resizer.className = 'col-resizer';
+        resizer.title = '拖拉調整欄寬';
+        resizer.setAttribute('aria-label', '拖拉調整欄寬');
         th.appendChild(resizer);
 
         let startX, startWidth;
@@ -160,8 +161,8 @@ function renderThead() {
     if (!theadTr) return;
 
     let html = '';
-    html += thCell('排序', colWidthByText('排序', { min: 34, max: 42, pad: 16 }), { className: 'text-sm font-bold text-gray-500' });
-    html += thCell('拖拉', colWidthByText('拖拉', { min: 34, max: 42, pad: 16 }), { className: 'text-sm font-bold text-gray-500' });
+    html += thCell('序', colWidthByText('99', { min: 24, max: 28, pad: 14, charW: 10 }), { className: 'text-sm font-bold text-gray-500' });
+    html += thCell('☰', colWidthByText('☰', { min: 24, max: 28, pad: 14, charW: 10 }), { className: 'text-sm font-bold text-gray-500' });
     html += thCell('桌', colWidthByText('分配桌次', { min: 40, max: 60 }));
     html += thCell('桌次座位', colWidthByText('第 99 桌 - 第 99 位', { min: 88, max: 100 }), { align: 'left' });
     html += thCell('賓客姓名', colWidthByText('賓客姓名', { min: 128, max: 150 }), { align: 'left' });
@@ -213,8 +214,8 @@ function renderDOMRows() {
         const labelsTdHTML = buildMultiTagCellHTML(PRIMARY_TAG_KEY, tags);
 
         tr.innerHTML = `
-            <td class="py-2 px-2 text-center font-mono text-gray-400 font-bold row-sort-num">${index + 1}</td>
-            <td class="py-2 px-2 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize">☰</td>
+            <td class="py-2 px-1 text-center font-mono text-gray-400 font-bold row-sort-num row-sort-cell">${index + 1}</td>
+            <td class="py-2 px-1 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize row-drag-cell">☰</td>
             <td class="py-2 px-2">${tableInputHTML}</td>
             <td class="py-2 px-2 text-left font-mono font-bold text-gray-600 row-seat-txt-cell">第 <span class="row-table-display-num">${guest.table || '-'}</span> 桌 - 第 <span class="row-seat-num">${guest.table ? guest.sort : '-'}</span> 位</td>
             <td class="py-2 px-2">
@@ -254,8 +255,8 @@ function addNewGuestRow() {
     const nextIndex = tbody.children.length + 1;
 
     tr.innerHTML = `
-        <td class="py-2 px-2 text-center font-mono text-gray-400 font-bold row-sort-num">${nextIndex}</td>
-        <td class="py-2 px-2 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize">☰</td>
+        <td class="py-2 px-1 text-center font-mono text-gray-400 font-bold row-sort-num row-sort-cell">${nextIndex}</td>
+        <td class="py-2 px-1 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize row-drag-cell">☰</td>
         <td class="py-2 px-2">${tableInputHTML}</td>
         <td class="py-2 px-2 text-left font-mono font-bold text-gray-600 row-seat-txt-cell">未安排</td>
         <td class="py-2 px-2">

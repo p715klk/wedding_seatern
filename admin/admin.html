@@ -9,22 +9,6 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <link rel="stylesheet" href="admin_style.css">
-    <style>
-        /* 欄位手動拉伸線樣式 */
-        .resizer {
-            position: absolute;
-            top: 0;
-            right: 0;
-            width: 6px;
-            cursor: col-resize;
-            user-select: none;
-            height: 100%;
-            z-index: 30;
-        }
-        .resizer:hover, .resizing {
-            border-right: 3px solid #ef4444;
-        }
-    </style>
 </head>
 <body class="admin-page bg-gray-100 text-gray-800 font-sans h-screen flex flex-col p-4 overflow-hidden">
 
@@ -33,7 +17,7 @@
         <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-gray-300 pb-3 flex-shrink-0 gap-3">
             <div>
                 <h1 class="text-xl font-bold text-red-700">📋 賓客名單動態多重標籤管理後台</h1>
-                <p class="text-[11px] text-gray-500 mt-0.5">按住 ☰ 拖拉排序；標籤欄支援同一人多選（用 ＋加入標籤），表頭邊緣可手拉調整闊度。</p>
+                <p class="text-[11px] text-gray-500 mt-0.5">按住 ☰ 拖拉排序；標籤欄支援同一人多選（用 ＋加入標籤）。表頭欄位右側灰色握把可拖拉調整欄寬。</p>
             </div>
             
             <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto">

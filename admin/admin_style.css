@@ -1,8 +1,56 @@
 /* ==========================================
    Admin Panel (Excel 表格 + 拖拉排序) 樣式
    ========================================== */
-.excel-table th, .excel-table td {
+.excel-table th, .excel-table td,
+#excel-table th, #excel-table td {
     border: 1px solid #e2e8f0;
+}
+
+/* 表頭欄位分隔線 + 可調欄寬握把 */
+#excel-table thead th {
+    position: relative;
+    border-right: 1px solid #cbd5e1;
+    background-color: #f9fafb;
+}
+#excel-table thead th:last-child {
+    border-right: 1px solid #e2e8f0;
+}
+
+.col-resizer {
+    position: absolute;
+    top: 0;
+    right: -4px;
+    width: 9px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 30;
+    touch-action: none;
+}
+.col-resizer::before {
+    content: '';
+    position: absolute;
+    top: 18%;
+    bottom: 18%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 3px;
+    border-radius: 2px;
+    background: #94a3b8;
+    box-shadow: -4px 0 0 #94a3b8, 4px 0 0 #94a3b8;
+    transition: background 0.15s, box-shadow 0.15s, width 0.15s;
+}
+.col-resizer:hover::before,
+.col-resizer.resizing::before {
+    width: 4px;
+    background: #ef4444;
+    box-shadow: -4px 0 0 #ef4444, 4px 0 0 #ef4444;
+}
+.col-resizer:hover {
+    background: rgba(239, 68, 68, 0.08);
+}
+.col-resizer.resizing {
+    background: rgba(239, 68, 68, 0.15);
 }
 
 .excel-input:focus {
@@ -52,34 +100,39 @@
     cursor: pointer;
 }
 
-/* 電腦版：15px 表格字級，1366×768 約顯示 8–10 行 */
+/* 電腦版：16px 表格字級，1366×768 約顯示 8–10 行 */
 @media screen and (min-width: 769px) {
     #excel-table {
-        font-size: 15px;
+        font-size: 16px;
     }
     #excel-table thead th {
-        font-size: 13px !important;
+        font-size: 14px !important;
         padding-top: 0.5rem !important;
         padding-bottom: 0.5rem !important;
     }
     #excel-tbody td {
-        padding-top: 0.5rem !important;
-        padding-bottom: 0.5rem !important;
+        padding-top: 0.625rem !important;
+        padding-bottom: 0.625rem !important;
+    }
+    #excel-tbody td.row-sort-cell,
+    #excel-tbody td.row-drag-cell {
+        padding-left: 0.25rem !important;
+        padding-right: 0.25rem !important;
     }
     #excel-tbody input,
     #excel-tbody select,
     #excel-tbody .row-seat-txt-cell,
     #excel-tbody button {
-        font-size: 15px !important;
-        padding: 0.2rem 0.35rem !important;
+        font-size: 16px !important;
+        padding: 0.25rem 0.4rem !important;
     }
     #excel-tbody .tag-chip {
-        font-size: 15px !important;
-        padding: 0.15rem 0.45rem !important;
+        font-size: 16px !important;
+        padding: 0.2rem 0.5rem !important;
     }
     #excel-tbody .row-tag-add-select {
-        font-size: 15px !important;
-        max-width: 4rem;
+        font-size: 16px !important;
+        max-width: 4.25rem;
     }
     #excel-tbody .row-side-select {
         text-align: center;
@@ -87,11 +140,11 @@
         padding-right: 0.15rem !important;
     }
     #excel-tbody .drag-handle {
-        font-size: 1.1rem !important;
+        font-size: 1.15rem !important;
     }
 }
 
-/* 1366×768 等矮螢幕：再壓緊頁面留白，確保 8–10 行 */
+/* 1366×768 等矮螢幕：壓緊頁面留白 + 略增行高，確保 8–10 行 */
 @media screen and (min-width: 769px) and (max-height: 820px) {
     body.admin-page {
         padding: 0.5rem !important;
@@ -107,6 +160,10 @@
     }
     body.admin-page header p {
         display: none;
+    }
+    #excel-tbody td {
+        padding-top: 0.7rem !important;
+        padding-bottom: 0.7rem !important;
     }
 }
 
