@@ -915,8 +915,6 @@ let printPreviewZoom = 1;
 let printPreviewOrientation = 'portrait';
 let printLayoutZoom = 1;
 let printPreviewBuilder = null;
-let printPreviewIsRaster = false;
-let printPreviewRasterToken = 0;
 const PRINT_ZOOM_STEP = 0.2;
 const PRINT_ZOOM_MIN = 0.2;
 const PRINT_ZOOM_MAX = 3;
@@ -961,87 +959,7 @@ function openPrintPreview(buildHTML) {
     closePrintMenu();
     if (!requireTablesBounds()) return;
     printPreviewBuilder = buildHTML;
-    if (isMobileViewport()) {
-        openPrintPreviewAsRaster(buildHTML);
-        return;
-    }
-    printPreviewIsRaster = false;
     showPrintPreview(buildHTML());
-}
-
-async function openPrintPreviewAsRaster(buildHTML) {
-    const overlay = document.getElementById('print-preview-overlay');
-    const sheet = document.getElementById('print-preview-sheet');
-    if (!overlay || !sheet) return;
-
-    const token = ++printPreviewRasterToken;
-    printPreviewIsRaster = true;
-    printPreviewZoom = 1;
-    document.body.dataset.printOrientation = printPreviewOrientation;
-    applyPrintPageStyle();
-    updatePrintOrientationUI();
-    document.body.classList.add('print-preview-open');
-    overlay.classList.remove('hidden');
-    sheet.innerHTML = '<div class="print-raster-loading">正在生成列印圖像…</div>';
-    document.getElementById('print-preview-scroll')?.scrollTo(0, 0);
-
-    try {
-        const imgHTML = await rasterizePrintToImageHTML(buildHTML);
-        if (token !== printPreviewRasterToken) return;
-        showPrintPreview(imgHTML, null, { preserveOpen: true });
-    } catch (err) {
-        console.error(err);
-        if (token !== printPreviewRasterToken) return;
-        alert('❌ 無法生成列印圖像，請稍後再試。');
-        closePrintPreview();
-    }
-}
-
-async function rasterizePrintToImageHTML(buildHTML) {
-    if (typeof html2canvas !== 'function') {
-        throw new Error('html2canvas unavailable');
-    }
-
-    const page = getPrintPageInnerSize();
-    const staging = document.createElement('div');
-    staging.className = 'print-raster-staging';
-    staging.style.cssText = [
-        'position:fixed',
-        'left:0',
-        'top:0',
-        'width:' + page.w + 'px',
-        'height:' + page.h + 'px',
-        'opacity:0',
-        'pointer-events:none',
-        'z-index:-1',
-        'overflow:hidden',
-        'background:#fff',
-        'box-sizing:border-box'
-    ].join(';');
-    staging.innerHTML = `<div id="print-preview-sheet" style="width:${page.w}px;height:${page.h}px;box-sizing:border-box;background:#fff;overflow:visible">${buildHTML()}</div>`;
-    document.body.appendChild(staging);
-
-    try {
-        if (document.fonts?.ready) await document.fonts.ready;
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        await new Promise(resolve => setTimeout(resolve, 50));
-
-        const target = staging.firstElementChild;
-        const snapshot = await html2canvas(target, {
-            backgroundColor: '#ffffff',
-            scale: 2,
-            width: page.w,
-            height: page.h,
-            useCORS: true,
-            logging: false,
-            windowWidth: page.w,
-            windowHeight: page.h
-        });
-        const dataUrl = snapshot.toDataURL('image/png');
-        return `<div class="print-image-layout" style="width:${page.w}px;height:${page.h}px"><img src="${dataUrl}" alt="列印預覽" width="${page.w}" height="${page.h}"></div>`;
-    } finally {
-        staging.remove();
-    }
 }
 
 function cloneTablePlateForPrint(plate) {
@@ -1089,17 +1007,16 @@ function buildCanvasPrintHTML() {
 
 function applyPrintPreviewTransform() {
     const viewport = document.getElementById('print-preview-viewport');
+    const sheet = document.getElementById('print-preview-sheet');
     const pct = document.getElementById('print-zoom-percent');
+    const page = getPrintPageInnerSize();
+    if (!viewport || !sheet) return;
 
-    if (viewport) {
-        viewport.style.zoom = printPreviewZoom;
-        if (!('zoom' in viewport.style)) {
-            viewport.style.transform = `scale(${printPreviewZoom})`;
-            viewport.style.transformOrigin = 'top center';
-        } else {
-            viewport.style.transform = '';
-        }
-    }
+    sheet.style.transform = `scale(${printPreviewZoom})`;
+    sheet.style.transformOrigin = 'top left';
+    viewport.style.width = `${Math.ceil(page.w * printPreviewZoom)}px`;
+    viewport.style.height = `${Math.ceil(page.h * printPreviewZoom)}px`;
+
     if (pct) pct.textContent = `${Math.round(printPreviewZoom * 100)}%`;
 }
 
@@ -1110,11 +1027,11 @@ function stepPrintPreviewZoom(delta) {
 
 function fitPrintPreviewZoom() {
     const scroll = document.getElementById('print-preview-scroll');
-    const sheet = document.getElementById('print-preview-sheet');
-    if (!scroll || !sheet) return;
-    const padding = 48;
-    const zoomX = (scroll.clientWidth - padding) / sheet.offsetWidth;
-    const zoomY = (scroll.clientHeight - padding) / sheet.offsetHeight;
+    if (!scroll) return;
+    const page = getPrintPageInnerSize();
+    const padding = isMobileViewport() ? 24 : 48;
+    const zoomX = (scroll.clientWidth - padding) / page.w;
+    const zoomY = (scroll.clientHeight - padding) / page.h;
     printPreviewZoom = snapPrintPreviewZoom(Math.min(zoomX, zoomY));
     applyPrintPreviewTransform();
 }
@@ -1147,12 +1064,7 @@ function setPrintOrientation(orientation) {
 function rebuildPrintPreviewContent() {
     const sheet = document.getElementById('print-preview-sheet');
     if (!sheet || !document.body.classList.contains('print-preview-open') || !printPreviewBuilder) return;
-    if (isMobileViewport()) {
-        openPrintPreviewAsRaster(printPreviewBuilder);
-        return;
-    }
     const savedZoom = printPreviewZoom;
-    printPreviewIsRaster = false;
     sheet.innerHTML = printPreviewBuilder();
     printPreviewZoom = savedZoom;
     requestAnimationFrame(() => {
@@ -1161,54 +1073,58 @@ function rebuildPrintPreviewContent() {
     });
 }
 
-function showPrintPreview(contentHTML, cleanup, options = {}) {
+function showPrintPreview(contentHTML, cleanup) {
     const sheet = document.getElementById('print-preview-sheet');
     const overlay = document.getElementById('print-preview-overlay');
     if (!sheet || !overlay) return;
 
-    if (!options.preserveOpen && printPreviewCleanup) printPreviewCleanup();
-    if (!options.preserveOpen) printPreviewCleanup = cleanup || null;
+    if (printPreviewCleanup) printPreviewCleanup();
+    printPreviewCleanup = cleanup || null;
 
-    if (!options.preserveOpen) {
-        printPreviewZoom = 1;
-        document.body.dataset.printOrientation = printPreviewOrientation;
-        applyPrintPageStyle();
-        updatePrintOrientationUI();
-    }
+    printPreviewZoom = 1;
+    document.body.dataset.printOrientation = printPreviewOrientation;
+    applyPrintPageStyle();
+    updatePrintOrientationUI();
 
     sheet.innerHTML = contentHTML;
     const viewport = document.getElementById('print-preview-viewport');
+    const sheetEl = document.getElementById('print-preview-sheet');
     if (viewport) {
-        viewport.style.zoom = '';
-        viewport.style.transform = '';
+        viewport.style.width = '';
+        viewport.style.height = '';
+    }
+    if (sheetEl) {
+        sheetEl.style.transform = '';
     }
     document.body.classList.add('print-preview-open');
     overlay.classList.remove('hidden');
     document.getElementById('print-preview-scroll')?.scrollTo(0, 0);
     requestAnimationFrame(() => {
-        applyPrintPreviewTransform();
         if (isMobileViewport()) fitPrintPreviewZoom();
+        else applyPrintPreviewTransform();
     });
 }
 
 function closePrintPreview() {
-    printPreviewRasterToken += 1;
     const overlay = document.getElementById('print-preview-overlay');
     if (printPreviewCleanup) {
         printPreviewCleanup();
         printPreviewCleanup = null;
     }
     printPreviewBuilder = null;
-    printPreviewIsRaster = false;
     document.body.classList.remove('print-preview-open');
     delete document.body.dataset.printOrientation;
     overlay?.classList.add('hidden');
     const sheet = document.getElementById('print-preview-sheet');
     if (sheet) sheet.innerHTML = '';
     const viewport = document.getElementById('print-preview-viewport');
+    const sheetEl = document.getElementById('print-preview-sheet');
     if (viewport) {
-        viewport.style.zoom = '';
-        viewport.style.transform = '';
+        viewport.style.width = '';
+        viewport.style.height = '';
+    }
+    if (sheetEl) {
+        sheetEl.style.transform = '';
     }
     printPreviewZoom = 1;
 }

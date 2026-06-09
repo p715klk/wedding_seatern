@@ -338,20 +338,23 @@
             background: #fff;
             box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
             box-sizing: border-box;
-            overflow: visible;
+            overflow: hidden;
+            flex-shrink: 0;
         }
         #print-preview-viewport {
             transform-origin: top center;
+            flex-shrink: 0;
         }
         body[data-print-orientation="portrait"] #print-preview-sheet {
             width: 756px;
             height: 1085px;
-            max-width: calc(100vw - 3rem);
         }
         body[data-print-orientation="landscape"] #print-preview-sheet {
             width: 1085px;
             height: 756px;
-            max-width: calc(100vw - 3rem);
+        }
+        body.print-preview-open #print-preview-scroll {
+            touch-action: pan-x pan-y;
         }
         .print-tables-layout {
             position: relative;
@@ -443,18 +446,15 @@
                 background: #fff !important;
             }
             body.print-preview-open #print-preview-viewport {
-                zoom: 1 !important;
+                width: auto !important;
+                height: auto !important;
                 transform: none !important;
             }
             body.print-preview-open #print-preview-sheet {
                 box-shadow: none !important;
                 margin: 0 !important;
                 padding: 0 !important;
-            }
-            body.print-preview-open .print-image-layout img {
-                width: 100% !important;
-                height: auto !important;
-                max-width: 100%;
+                transform: none !important;
             }
         }
 
@@ -465,6 +465,7 @@
             #global-stats { display: none; }
             header h1 span:last-child { font-size: 0.85rem; }
             .pool-guest-chip { font-size: 15px !important; padding: 12px 10px !important; }
+            #print-preview-scroll { padding: 12px; }
         }
     </style>
 </head>
@@ -650,7 +651,6 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script src="seating.js?v=5"></script>
+    <script src="seating.js?v=6"></script>
 </body>
 </html>
