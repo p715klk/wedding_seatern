@@ -888,18 +888,23 @@ function snapPrintPreviewZoom(value) {
     return Math.min(PRINT_ZOOM_MAX, Math.max(PRINT_ZOOM_MIN, Math.round(value / PRINT_ZOOM_STEP) * PRINT_ZOOM_STEP));
 }
 
+const PRINT_PAGE_PAD = 10;
+
 function getPrintPageInnerSize(orientation = printPreviewOrientation) {
-    if (orientation === 'landscape') return { w: 1000, h: 680 };
-    return { w: 680, h: 1000 };
+    // A4 @ 96dpi，扣除 5mm 邊距後可印區域
+    if (orientation === 'landscape') return { w: 1085, h: 756 };
+    return { w: 756, h: 1085 };
 }
 
 function computePrintLayoutZoom(bounds) {
-    const pad = 32;
     const spanW = bounds.maxX - bounds.minX;
     const spanH = bounds.maxY - bounds.minY;
     const page = getPrintPageInnerSize();
-    const fitZoom = Math.min((page.w - pad * 2) / spanW, (page.h - pad * 2) / spanH);
-    return Math.min(1.15, Math.max(0.08, fitZoom));
+    const fitZoom = Math.min(
+        (page.w - PRINT_PAGE_PAD * 2) / spanW,
+        (page.h - PRINT_PAGE_PAD * 2) / spanH
+    );
+    return Math.min(2, Math.max(0.08, fitZoom));
 }
 
 function cloneTablePlateForPrint(plate) {
@@ -917,13 +922,15 @@ function buildCanvasPrintHTML() {
     if (!bounds) return '<p class="print-empty">目前沒有任何枱位資料。</p>';
 
     const page = getPrintPageInnerSize();
-    const pad = 32;
+    const pad = PRINT_PAGE_PAD;
     const spanW = bounds.maxX - bounds.minX;
     const spanH = bounds.maxY - bounds.minY;
     printLayoutZoom = computePrintLayoutZoom(bounds);
 
-    const offsetX = (page.w - (spanW + pad * 2) * printLayoutZoom) / 2;
-    const offsetY = (page.h - (spanH + pad * 2) * printLayoutZoom) / 2;
+    const contentW = (spanW + pad * 2) * printLayoutZoom;
+    const contentH = (spanH + pad * 2) * printLayoutZoom;
+    const offsetX = (page.w - contentW) / 2;
+    const offsetY = (page.h - contentH) / 2;
 
     const tablesHTML = Array.from(canvas.querySelectorAll('.draggable-table')).map(el => {
         const bx = parseFloat(el.dataset.baseX);
@@ -983,7 +990,7 @@ function applyPrintPageStyle() {
         document.head.appendChild(styleEl);
     }
     const pageSize = printPreviewOrientation === 'landscape' ? 'A4 landscape' : 'A4 portrait';
-    styleEl.textContent = `@media print { @page { size: ${pageSize}; margin: 10mm; } }`;
+    styleEl.textContent = `@media print { @page { size: ${pageSize}; margin: 5mm; } }`;
 }
 
 function setPrintOrientation(orientation) {
@@ -1080,7 +1087,7 @@ function buildGuestCirclePrintHTML() {
     const page = getPrintPageInnerSize();
     const sheetW = page.w;
     const sheetH = page.h;
-    const pad = 28;
+    const pad = PRINT_PAGE_PAD;
     const spanW = bounds.maxX - bounds.minX;
     const spanH = bounds.maxY - bounds.minY;
     const scale = Math.min((sheetW - pad * 2) / spanW, (sheetH - pad * 2) / spanH);
