@@ -877,48 +877,137 @@ document.addEventListener('click', (e) => {
 });
 
 let printPreviewCleanup = null;
+let printPreviewZoom = 1;
+let printPreviewOrientation = 'portrait';
+let printLayoutZoom = 1;
+const PRINT_ZOOM_STEP = 0.2;
+const PRINT_ZOOM_MIN = 0.2;
+const PRINT_ZOOM_MAX = 3;
 
-function saveViewState() {
-    return { panX, panY, zoom, sidebarOpen: isSidebarOpen };
+function snapPrintPreviewZoom(value) {
+    return Math.min(PRINT_ZOOM_MAX, Math.max(PRINT_ZOOM_MIN, Math.round(value / PRINT_ZOOM_STEP) * PRINT_ZOOM_STEP));
 }
 
-function restoreViewState(saved) {
-    if (!saved) return;
-    panX = saved.panX;
-    panY = saved.panY;
-    zoom = saved.zoom;
-    applyTransform();
-    if (saved.sidebarOpen) openSidebar();
-    else closeSidebar({ instant: true });
+function getPrintPageInnerSize(orientation = printPreviewOrientation) {
+    if (orientation === 'landscape') return { w: 1000, h: 680 };
+    return { w: 680, h: 1000 };
 }
 
-function waitFrames(count = 2) {
-    return new Promise(resolve => {
-        let left = count;
-        const tick = () => {
-            left -= 1;
-            if (left <= 0) resolve();
-            else requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
+function computePrintLayoutZoom(bounds) {
+    const pad = 32;
+    const spanW = bounds.maxX - bounds.minX;
+    const spanH = bounds.maxY - bounds.minY;
+    const page = getPrintPageInnerSize();
+    const fitZoom = Math.min((page.w - pad * 2) / spanW, (page.h - pad * 2) / spanH);
+    return Math.min(1.15, Math.max(0.08, fitZoom));
+}
+
+function cloneTablePlateForPrint(plate) {
+    const plateClone = plate.cloneNode(true);
+    plateClone.querySelectorAll('[draggable]').forEach(node => node.removeAttribute('draggable'));
+    plateClone.querySelectorAll('[ondragover],[ondrop]').forEach(node => {
+        node.removeAttribute('ondragover');
+        node.removeAttribute('ondrop');
     });
+    return plateClone.outerHTML;
 }
 
-function fitViewToAllTablesForPrint() {
+function buildCanvasPrintHTML() {
     const bounds = getTablesBoundingBox();
-    if (!bounds) return;
+    if (!bounds) return '<p class="print-empty">目前沒有任何枱位資料。</p>';
 
-    const groupW = bounds.maxX - bounds.minX;
-    const groupH = bounds.maxY - bounds.minY;
-    const vpRect = viewport.getBoundingClientRect();
-    const padding = 56;
-    const zoomX = vpRect.width / (groupW + padding * 2);
-    const zoomY = vpRect.height / (groupH + padding * 2);
+    const page = getPrintPageInnerSize();
+    const pad = 32;
+    const spanW = bounds.maxX - bounds.minX;
+    const spanH = bounds.maxY - bounds.minY;
+    printLayoutZoom = computePrintLayoutZoom(bounds);
 
-    zoom = Math.min(1.15, Math.max(0.1, Math.min(zoomX, zoomY)));
-    panX = (vpRect.width / 2) - bounds.centerX * zoom;
-    panY = (vpRect.height / 2) - bounds.centerY * zoom;
-    applyTransform();
+    const offsetX = (page.w - (spanW + pad * 2) * printLayoutZoom) / 2;
+    const offsetY = (page.h - (spanH + pad * 2) * printLayoutZoom) / 2;
+
+    const tablesHTML = Array.from(canvas.querySelectorAll('.draggable-table')).map(el => {
+        const bx = parseFloat(el.dataset.baseX);
+        const by = parseFloat(el.dataset.baseY);
+        const plate = el.querySelector('.table-plate');
+        if (!plate) return '';
+        const left = offsetX + (bx - bounds.minX + pad) * printLayoutZoom;
+        const top = offsetY + (by - bounds.minY + pad) * printLayoutZoom;
+        return `<div class="draggable-table" style="left:${left}px;top:${top}px">${cloneTablePlateForPrint(plate)}</div>`;
+    }).join('');
+
+    return `<div class="print-tables-layout" style="--zoom:${printLayoutZoom}">${tablesHTML}</div>`;
+}
+
+function applyPrintPreviewTransform() {
+    const viewport = document.getElementById('print-preview-viewport');
+    const pct = document.getElementById('print-zoom-percent');
+
+    if (viewport) {
+        viewport.style.zoom = printPreviewZoom;
+        if (!('zoom' in viewport.style)) {
+            viewport.style.transform = `scale(${printPreviewZoom})`;
+            viewport.style.transformOrigin = 'top center';
+        } else {
+            viewport.style.transform = '';
+        }
+    }
+    if (pct) pct.textContent = `${Math.round(printPreviewZoom * 100)}%`;
+}
+
+function stepPrintPreviewZoom(delta) {
+    printPreviewZoom = snapPrintPreviewZoom(printPreviewZoom + delta);
+    applyPrintPreviewTransform();
+}
+
+function fitPrintPreviewZoom() {
+    const scroll = document.getElementById('print-preview-scroll');
+    const sheet = document.getElementById('print-preview-sheet');
+    if (!scroll || !sheet) return;
+    const padding = 48;
+    const zoomX = (scroll.clientWidth - padding) / sheet.offsetWidth;
+    const zoomY = (scroll.clientHeight - padding) / sheet.offsetHeight;
+    printPreviewZoom = snapPrintPreviewZoom(Math.min(zoomX, zoomY));
+    applyPrintPreviewTransform();
+}
+
+function updatePrintOrientationUI() {
+    document.getElementById('btn-print-portrait')?.classList.toggle('is-active', printPreviewOrientation === 'portrait');
+    document.getElementById('btn-print-landscape')?.classList.toggle('is-active', printPreviewOrientation === 'landscape');
+}
+
+function applyPrintPageStyle() {
+    let styleEl = document.getElementById('print-page-style');
+    if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'print-page-style';
+        document.head.appendChild(styleEl);
+    }
+    const pageSize = printPreviewOrientation === 'landscape' ? 'A4 landscape' : 'A4 portrait';
+    styleEl.textContent = `@media print { @page { size: ${pageSize}; margin: 10mm; } }`;
+}
+
+function setPrintOrientation(orientation) {
+    if (orientation !== 'portrait' && orientation !== 'landscape') return;
+    printPreviewOrientation = orientation;
+    document.body.dataset.printOrientation = orientation;
+    updatePrintOrientationUI();
+    applyPrintPageStyle();
+    rebuildPrintPreviewContent();
+}
+
+function rebuildPrintPreviewContent() {
+    const sheet = document.getElementById('print-preview-sheet');
+    if (!sheet || !document.body.classList.contains('print-preview-open')) return;
+    const savedZoom = printPreviewZoom;
+    if (sheet.querySelector('.print-tables-layout')) {
+        sheet.innerHTML = buildCanvasPrintHTML();
+    } else if (sheet.querySelector('.print-floor')) {
+        sheet.innerHTML = buildGuestCirclePrintHTML();
+    } else {
+        return;
+    }
+    printPreviewZoom = savedZoom;
+    requestAnimationFrame(() => applyPrintPreviewTransform());
 }
 
 function showPrintPreview(contentHTML, cleanup) {
@@ -929,10 +1018,21 @@ function showPrintPreview(contentHTML, cleanup) {
     if (printPreviewCleanup) printPreviewCleanup();
     printPreviewCleanup = cleanup || null;
 
+    printPreviewZoom = 1;
+    document.body.dataset.printOrientation = printPreviewOrientation;
+    applyPrintPageStyle();
+    updatePrintOrientationUI();
+
     sheet.innerHTML = contentHTML;
+    const viewport = document.getElementById('print-preview-viewport');
+    if (viewport) {
+        viewport.style.zoom = '';
+        viewport.style.transform = '';
+    }
     document.body.classList.add('print-preview-open');
     overlay.classList.remove('hidden');
     document.getElementById('print-preview-scroll')?.scrollTo(0, 0);
+    requestAnimationFrame(() => applyPrintPreviewTransform());
 }
 
 function closePrintPreview() {
@@ -942,52 +1042,30 @@ function closePrintPreview() {
         printPreviewCleanup = null;
     }
     document.body.classList.remove('print-preview-open');
+    delete document.body.dataset.printOrientation;
     overlay?.classList.add('hidden');
     const sheet = document.getElementById('print-preview-sheet');
     if (sheet) sheet.innerHTML = '';
+    const viewport = document.getElementById('print-preview-viewport');
+    if (viewport) {
+        viewport.style.zoom = '';
+        viewport.style.transform = '';
+    }
+    printPreviewZoom = 1;
 }
 
 function executePrintPreview() {
+    applyPrintPageStyle();
     window.print();
 }
 
-async function printCanvasView() {
+function printCanvasView() {
     closePrintMenu();
-    if (typeof html2canvas === 'undefined') {
-        alert('❌ 打印組件尚未載入，請重新整理頁面後再試。');
+    if (!getTablesBoundingBox()) {
+        alert('❌ 目前沒有任何枱位資料。');
         return;
     }
-
-    const saved = saveViewState();
-    const wasSidebarOpen = isSidebarOpen;
-    if (wasSidebarOpen) closeSidebar({ instant: true });
-
-    const ghost = document.querySelector('.guest-drag-ghost');
-    if (ghost) ghost.style.visibility = 'hidden';
-
-    try {
-        fitViewToAllTablesForPrint();
-        await waitFrames(3);
-
-        const shot = await html2canvas(viewport, {
-            backgroundColor: '#f1f5f9',
-            scale: Math.min(2, window.devicePixelRatio || 1.5),
-            useCORS: true,
-            logging: false,
-            ignoreElements: (el) => el.classList?.contains('guest-drag-ghost') || el.id === 'sidebar-panel'
-        });
-
-        showPrintPreview(
-            `<img src="${shot.toDataURL('image/png')}" alt="排位畫面" class="print-canvas-shot">`,
-            () => restoreViewState(saved)
-        );
-    } catch (err) {
-        console.error(err);
-        restoreViewState(saved);
-        alert('❌ 打印畫面失敗，請稍後再試。');
-    } finally {
-        if (ghost) ghost.style.visibility = '';
-    }
+    showPrintPreview(buildCanvasPrintHTML());
 }
 
 function getPrintNameColumnCount(guestCount) {
@@ -999,8 +1077,9 @@ function buildGuestCirclePrintHTML() {
     const bounds = getTablesBoundingBox();
     if (!bounds) return '<p class="print-empty">目前沒有任何枱位資料。</p>';
 
-    const sheetW = 1040;
-    const sheetH = 700;
+    const page = getPrintPageInnerSize();
+    const sheetW = page.w;
+    const sheetH = page.h;
     const pad = 28;
     const spanW = bounds.maxX - bounds.minX;
     const spanH = bounds.maxY - bounds.minY;
@@ -1021,8 +1100,8 @@ function buildGuestCirclePrintHTML() {
             .filter(g => g && g.name)
             .sort((a, b) => (a.sort || 99) - (b.sort || 99));
         const colCount = getPrintNameColumnCount(guests.length);
-        const fontSize = Math.max(7.5, Math.min(11.5, size * 0.026));
-        const titleSize = Math.max(9, Math.min(14, size * 0.048));
+        const fontSize = Math.max(9, Math.min(13, size * 0.032));
+        const titleSize = Math.max(10, Math.min(15, size * 0.05));
         const borderW = Math.max(1.5, scale * 1.8);
         const names = guests.length
             ? guests.map(g => `<span class="print-name-item">${escapeHtml(g.name)}</span>`).join('')
@@ -1038,11 +1117,19 @@ function buildGuestCirclePrintHTML() {
         `;
     }).join('');
 
-    return `<div class="print-floor" style="width:${floorW}px;height:${floorH + titleH}px">${circles}</div>`;
+    const offsetX = (sheetW - floorW) / 2;
+    const offsetY = (sheetH - (floorH + titleH)) / 2;
+    return `<div class="print-floor" style="width:${sheetW}px;height:${sheetH}px">
+        <div class="print-floor-inner" style="position:relative;width:${floorW}px;height:${floorH + titleH}px;left:${offsetX}px;top:${offsetY}px">${circles}</div>
+    </div>`;
 }
 
 function printGuestListView() {
     closePrintMenu();
+    if (!getTablesBoundingBox()) {
+        alert('❌ 目前沒有任何枱位資料。');
+        return;
+    }
     showPrintPreview(buildGuestCirclePrintHTML());
 }
 
@@ -1871,3 +1958,5 @@ function deleteTableAction() {
         ]).then(() => { closeSettingsModal(); });
     }
 }
+
+applyPrintPageStyle();
