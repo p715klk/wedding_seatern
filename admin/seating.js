@@ -43,18 +43,44 @@ function applyMetaLabelColumns(meta) {
     }
 }
 
-function buildTagChipHTML(tag, columnKey) {
-    const safe = tag.replace(/"/g, '&quot;');
-    return `<span class="tag-chip inline-flex items-center gap-0.5 bg-red-100 text-red-800 px-1.5 py-0.5 rounded text-[10px] font-bold" data-tag="${safe}">${tag}<button type="button" onclick="removeModalTag(this,'${columnKey}')" class="text-red-500 hover:text-red-700 font-black leading-none">×</button></span>`;
+function getModalGuestSide() {
+    const el = document.getElementById('edit-guest-side');
+    return el && el.value === '女方' ? '女方' : '男方';
 }
 
-function buildTagAddSelectHTML(columnKey, selectedTags) {
+function tagChipSideClasses(side) {
+    if (side === '女方') {
+        return {
+            chip: 'bg-rose-100 text-rose-800',
+            btn: 'text-rose-500 hover:text-rose-700',
+            select: 'border-rose-200 bg-rose-50/20'
+        };
+    }
+    return {
+        chip: 'bg-blue-100 text-blue-800',
+        btn: 'text-blue-500 hover:text-blue-700',
+        select: 'border-blue-200 bg-blue-50/20'
+    };
+}
+
+function buildTagChipHTML(tag, columnKey, side = getModalGuestSide()) {
+    const safe = tag.replace(/"/g, '&quot;');
+    const c = tagChipSideClasses(side);
+    return `<span class="tag-chip inline-flex items-center gap-1 ${c.chip} px-2 py-1 rounded font-bold" data-tag="${safe}">${tag}<button type="button" onclick="removeModalTag(this,'${columnKey}')" class="${c.btn} font-black leading-none">×</button></span>`;
+}
+
+function buildTagAddSelectHTML(columnKey, selectedTags, side = getModalGuestSide()) {
     const optionsArr = categoriesByColumn[columnKey] || ['未分類'];
     const available = optionsArr.filter(cat => !selectedTags.includes(cat));
+    const c = tagChipSideClasses(side);
     let optsHTML = `<option value="">＋</option>`;
     optsHTML += available.map(cat => `<option value="${cat}">${cat}</option>`).join('');
     optsHTML += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>`;
-    return `<select onchange="handleModalTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border border-red-200 bg-red-50/20 rounded px-1 py-0.5 text-[10px] font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
+    return `<select onchange="handleModalTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border ${c.select} rounded px-2 py-1 font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
+}
+
+function refreshModalTagColors() {
+    renderModalTags(readModalTags());
 }
 
 function readModalTags() {
@@ -548,29 +574,91 @@ function splitCJKNameEvenly(text) {
     return `${escapeHtml(text.slice(0, half))}<br>${escapeHtml(text.slice(half))}`;
 }
 
+function isLatinGuestName(name) {
+    const core = (name || '').trim().replace(/\s*(\*\d+)?\s*(眷屬\s*[\d０-９]+)?\s*$/u, '');
+    return /^[A-Za-z][A-Za-z\s'.-]*$/.test(core);
+}
+
+function splitLatinNameEvenly(text) {
+    const parts = text.trim().split(/\s+/);
+    if (parts.length > 1) {
+        const mid = Math.ceil(parts.length / 2);
+        return `${escapeHtml(parts.slice(0, mid).join(' '))}<br>${escapeHtml(parts.slice(mid).join(' '))}`;
+    }
+    const word = parts[0];
+    if (word.length <= 7) return escapeHtml(word);
+    const half = Math.ceil(word.length / 2);
+    return `${escapeHtml(word.slice(0, half))}<br>${escapeHtml(word.slice(half))}`;
+}
+
+function getGuestNameTextClass(name) {
+    return isLatinGuestName(name) ? 'guest-name-text name-latn' : 'guest-name-text name-cjk';
+}
+
+function normalizeAttachLabel(text) {
+    const t = text.replace(/\s+/g, ' ').trim();
+    return t.replace(/眷屬\s*([0-9０-９]+)/gu, (_, n) => {
+        const num = n.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+        return `眷屬 ${num}`;
+    });
+}
+
 function formatGuestDisplayName(name) {
     const trimmed = (name || '').trim();
     if (!trimmed) return '';
 
-    const attachMatch = trimmed.match(/^(.+?)\s*(眷屬\s*\d+.*)$/);
+    // 「靚女姑姐 *3 眷屬1」→ 兩行：靚女姑姐 / *3 眷屬 1
+    const starAttach = trimmed.match(/^(.+?)\s*(\*\d+)\s*(眷屬\s*[\d０-９]+)\s*$/u);
+    if (starAttach) {
+        const star = starAttach[2];
+        const attach = normalizeAttachLabel(starAttach[3]);
+        return `${escapeHtml(starAttach[1].trim())}<br>${escapeHtml(star)} ${escapeHtml(attach)}`;
+    }
+
+    const attachMatch = trimmed.match(/^(.+?)\s*(眷屬\s*[\d０-９]+.*)$/u);
     let mainPart = trimmed;
     let attachPart = '';
     if (attachMatch) {
         mainPart = attachMatch[1].trim();
-        attachPart = attachMatch[2].replace(/\s+/g, '');
+        attachPart = attachMatch[2].trim();
     }
 
-    const cjkMain = mainPart.replace(/\s/g, '');
-    if (/^[\u4e00-\u9fff]+$/.test(cjkMain)) {
-        let html = splitCJKNameEvenly(cjkMain);
-        if (attachPart) html += `<br>${escapeHtml(attachPart)}`;
-        return html;
+    const starInMain = mainPart.match(/^(.+?)\s*(\*\d+)\s*$/);
+    if (starInMain && attachPart) {
+        const star = starInMain[2];
+        const attach = normalizeAttachLabel(attachPart);
+        return `${escapeHtml(starInMain[1].trim())}<br>${escapeHtml(star)} ${escapeHtml(attach)}`;
     }
 
-    if (attachPart) return `${escapeHtml(mainPart)}<br>${escapeHtml(attachPart)}`;
+    if (attachPart) {
+        const cjkMain = mainPart.replace(/\s/g, '');
+        const nameHtml = /^[\u4e00-\u9fff]+$/.test(cjkMain) && cjkMain.length > 5
+            ? splitCJKNameEvenly(cjkMain)
+            : escapeHtml(mainPart);
+        return `${nameHtml}<br>${escapeHtml(normalizeAttachLabel(attachPart))}`;
+    }
+
+    const cjkOnly = trimmed.replace(/\s/g, '');
+    if (/^[\u4e00-\u9fff]+$/.test(cjkOnly)) {
+        if (cjkOnly.length <= 5) return escapeHtml(cjkOnly);
+        return splitCJKNameEvenly(cjkOnly);
+    }
+
+    if (isLatinGuestName(trimmed)) {
+        return splitLatinNameEvenly(trimmed);
+    }
+
     if (trimmed.includes(' ')) {
+        const combo = trimmed.match(/^(.+?)\s+(\*\d+\s+眷屬\s*[\d０-９]+.*)$/u);
+        if (combo) {
+            const starAttachTail = combo[2].match(/^(\*\d+)\s*(眷屬\s*[\d０-９]+.*)$/u);
+            if (starAttachTail) {
+                return `${escapeHtml(combo[1].trim())}<br>${escapeHtml(starAttachTail[1])} ${escapeHtml(normalizeAttachLabel(starAttachTail[2]))}`;
+            }
+        }
         return trimmed.split(/\s+/).map(escapeHtml).join('<br>');
     }
+
     return escapeHtml(trimmed);
 }
 
@@ -609,14 +697,41 @@ function getSidebarRightEdge() {
     return getSidebarWidth();
 }
 
-function closeSidebar() {
+function getSidebarPanelWidth() {
+    return isMobileViewport() ? Math.min(window.innerWidth * 0.88, 300) : 320;
+}
+
+function openSidebar({ instant = false } = {}) {
+    if (isSidebarOpen) return;
+    const sidebar = document.getElementById('sidebar-panel');
+    const icon = document.getElementById('sidebar-toggle-icon');
+    if (instant) sidebar.classList.add('sidebar-no-transition');
+    sidebar.classList.remove('collapsed');
+    icon.innerText = '◀';
+    isSidebarOpen = true;
+    if (instant) {
+        requestAnimationFrame(() => sidebar.classList.remove('sidebar-no-transition'));
+    }
+}
+
+function closeSidebar({ instant = false } = {}) {
     if (!isSidebarOpen) return;
     const sidebar = document.getElementById('sidebar-panel');
     const icon = document.getElementById('sidebar-toggle-icon');
-    sidebar.classList.add('collapse-instant', 'collapsed');
+    if (instant) sidebar.classList.add('sidebar-no-transition');
+    sidebar.classList.add('collapsed');
     icon.innerText = '▶';
     isSidebarOpen = false;
-    requestAnimationFrame(() => sidebar.classList.remove('collapse-instant'));
+    if (instant) {
+        requestAnimationFrame(() => sidebar.classList.remove('sidebar-no-transition'));
+    }
+}
+
+function openSidebarIfDragEntersSidebar(clientX) {
+    if (isSidebarOpen || !isGuestDragging) return;
+    if (clientX <= getSidebarPanelWidth() + 16) {
+        openSidebar();
+    }
 }
 
 function closeSidebarIfDragLeavesSidebar(clientX, sidebarRight) {
@@ -629,20 +744,173 @@ function closeSidebarIfDragLeavesSidebar(clientX, sidebarRight) {
 
 function initMobileExperience() {
     if (!isMobileViewport()) return;
-    closeSidebar();
+    closeSidebar({ instant: true });
 }
 
 function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar-panel');
-    const icon = document.getElementById('sidebar-toggle-icon');
     if (isSidebarOpen) {
         closeSidebar();
     } else {
-        sidebar.classList.remove('collapsed');
-        icon.innerText = '◀';
-        isSidebarOpen = true;
+        openSidebar();
     }
 }
+
+function updateTableLockUI() {
+    const btn = document.getElementById('btn-lock-tables');
+    if (!btn) return;
+    if (isTablePositionLocked) {
+        btn.innerHTML = '🔒<span class="hide-mobile"> 已鎖</span>';
+        btn.classList.add('is-active');
+        btn.title = '枱位已鎖定，點擊解鎖';
+        document.body.classList.add('tables-position-locked');
+    } else {
+        btn.innerHTML = '🔓<span class="hide-mobile"> 枱位</span>';
+        btn.classList.remove('is-active');
+        btn.title = '鎖定枱位（防止拖動）';
+        document.body.classList.remove('tables-position-locked');
+    }
+}
+
+function toggleTablePositionLock() {
+    isTablePositionLocked = !isTablePositionLocked;
+    localStorage.setItem(TABLE_LOCK_KEY, isTablePositionLocked ? '1' : '0');
+    if (isTablePositionLocked) cancelTableDrag();
+    updateTableLockUI();
+}
+
+function closePrintMenu() {
+    const menu = document.getElementById('print-menu');
+    if (menu) menu.classList.add('hidden');
+}
+
+function togglePrintMenu(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('print-menu');
+    if (!menu) return;
+    menu.classList.toggle('hidden');
+}
+
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('#print-menu-wrap')) closePrintMenu();
+});
+
+async function printCanvasView() {
+    closePrintMenu();
+    if (typeof html2canvas === 'undefined') {
+        alert('❌ 打印組件尚未載入，請重新整理頁面後再試。');
+        return;
+    }
+    const target = document.getElementById('canvas-viewport');
+    const ghost = document.querySelector('.guest-drag-ghost');
+    if (ghost) ghost.style.visibility = 'hidden';
+
+    try {
+        const shot = await html2canvas(target, {
+            backgroundColor: '#f1f5f9',
+            scale: Math.min(2, window.devicePixelRatio || 1.5),
+            useCORS: true,
+            logging: false,
+            ignoreElements: (el) => el.classList?.contains('guest-drag-ghost')
+        });
+        openPrintWindow(
+            '排位畫面',
+            `<img src="${shot.toDataURL('image/png')}" alt="排位畫面" style="max-width:100%;height:auto;display:block;margin:0 auto;">`,
+            'img { max-width: 100%; height: auto; } body { margin: 0; padding: 0; text-align: center; }'
+        );
+    } catch (err) {
+        console.error(err);
+        alert('❌ 打印畫面失敗，請稍後再試。');
+    } finally {
+        if (ghost) ghost.style.visibility = '';
+    }
+}
+
+function buildGuestListPrintHTML() {
+    const sortedTableNums = Object.keys(tableSettings).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+    if (!sortedTableNums.length) {
+        return '<p class="empty">目前沒有任何枱位資料。</p>';
+    }
+
+    return sortedTableNums.map(tableNum => {
+        const settings = tableSettings[tableNum];
+        const idx = parseInt(tableNum, 10);
+        const label = (settings.label || '').trim();
+        const guests = (allGuests[idx] || [])
+            .filter(g => g && g.name)
+            .sort((a, b) => (a.sort || 99) - (b.sort || 99));
+
+        const title = `第 ${tableNum} 桌${label ? ` — ${escapeHtml(label)}` : ''}`;
+        const list = guests.length
+            ? `<ol>${guests.map(g => {
+                const sideTag = g.side === '女方' ? '女方' : '男方';
+                return `<li><span class="name">${escapeHtml(g.name)}</span><span class="side side-${sideTag === '女方' ? 'female' : 'male'}">${sideTag}</span></li>`;
+            }).join('')}</ol>`
+            : '<p class="empty-seat">（暫無賓客）</p>';
+
+        return `<section class="table-block"><h2>${title}</h2><div class="count">${guests.length} 位</div>${list}</section>`;
+    }).join('');
+}
+
+function printGuestListView() {
+    closePrintMenu();
+    const body = buildGuestListPrintHTML();
+    const styles = `
+        body { font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif; color: #1e293b; margin: 0; padding: 16px; }
+        h1 { font-size: 18px; margin: 0 0 12px; text-align: center; }
+        .meta { text-align: center; font-size: 11px; color: #64748b; margin-bottom: 16px; }
+        .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .table-block { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; break-inside: avoid; page-break-inside: avoid; }
+        .table-block h2 { font-size: 14px; margin: 0 0 4px; }
+        .count { font-size: 11px; color: #64748b; margin-bottom: 6px; }
+        ol { margin: 0; padding-left: 1.2rem; }
+        li { font-size: 13px; line-height: 1.45; margin: 2px 0; }
+        .name { font-weight: 700; }
+        .side { font-size: 11px; margin-left: 6px; color: #64748b; }
+        .side-female { color: #be123c; }
+        .side-male { color: #1d4ed8; }
+        .empty, .empty-seat { font-size: 12px; color: #94a3b8; margin: 0; }
+        @media print {
+            body { padding: 8mm; }
+            .grid { gap: 8px; }
+        }
+        @media (max-width: 640px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+    `;
+    const now = new Date().toLocaleString('zh-HK');
+    openPrintWindow(
+        '枱上賓客名單',
+        `<h1>婚宴枱上賓客名單</h1><p class="meta">列印時間：${escapeHtml(now)}</p><div class="grid">${body}</div>`,
+        styles
+    );
+}
+
+function openPrintWindow(title, bodyHTML, extraCSS = '') {
+    const printWin = window.open('', '_blank');
+    if (!printWin) {
+        alert('❌ 請允許彈出視窗以進行打印。');
+        return;
+    }
+    printWin.document.write(`<!DOCTYPE html>
+<html lang="zh-Hant-HK"><head>
+<meta charset="UTF-8"><title>${escapeHtml(title)}</title>
+<style>${extraCSS}</style>
+</head><body>${bodyHTML}</body></html>`);
+    printWin.document.close();
+    printWin.focus();
+    printWin.onload = () => {
+        printWin.print();
+        printWin.onafterprint = () => printWin.close();
+    };
+    setTimeout(() => {
+        if (!printWin.closed) {
+            printWin.print();
+        }
+    }, 400);
+}
+
+const TABLE_LOCK_KEY = 'seating_tables_locked';
+let isTablePositionLocked = localStorage.getItem(TABLE_LOCK_KEY) === '1';
 
 let isDraggingTable = false;
 let draggedTableElement = null;
@@ -775,6 +1043,7 @@ function setupTouchDrag(el, getDragData, options) {
             e.preventDefault();
             ghost.style.left = `${t.clientX}px`;
             ghost.style.top = `${t.clientY}px`;
+            openSidebarIfDragEntersSidebar(t.clientX);
             if (opts.onDragMove) opts.onDragMove(t.clientX, t.clientY, dragData);
         }
     }, { passive: false });
@@ -825,6 +1094,7 @@ function setupPoolTouchDrag(el, getDragData, opts) {
             const t = findTouch(ev.touches);
             if (!t) return;
 
+            openSidebarIfDragEntersSidebar(t.clientX);
             closeSidebarIfDragLeavesSidebar(t.clientX, sidebarRight);
 
             const dist = Math.hypot(t.clientX - startX, t.clientY - startY);
@@ -929,6 +1199,7 @@ database.ref().on('value', (snapshot) => {
 
     runRender();
     initMobileExperience();
+    updateTableLockUI();
     if (isMobileViewport()) {
         fitViewToTables();
     } else if (!localStorage.getItem('seating_view_fitted_v3')) {
@@ -1026,6 +1297,7 @@ function renderGroupData(groups, container) {
                     e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: "POOL", index: item.originalIndex, name: item.data.name }));
                 });
                 chip.addEventListener('drag', (e) => {
+                    openSidebarIfDragEntersSidebar(e.clientX);
                     closeSidebarIfDragLeavesSidebar(e.clientX);
                 });
                 chip.addEventListener('dragend', () => {
@@ -1072,6 +1344,7 @@ function renderCanvasTables() {
         tableWrapper.setAttribute('data-table', tableNum);
 
         const startTableDrag = (e) => {
+            if (isTablePositionLocked) return;
             if ((e.pointerType === 'mouse' && e.button !== 0) || isGuestDragging) return;
             if (e.target.closest('.seat-slot, .hub-center, .hub-ring')) return;
             e.stopPropagation();
@@ -1117,7 +1390,7 @@ function renderCanvasTables() {
             if (guest) {
                 const sideClass = guest.side === '女方' ? 'side-female' : 'side-male';
                 seatSlot.className = `seat-slot guest-seat-circle ${sideClass}`;
-                seatSlot.innerHTML = `<span class="guest-name-text" title="${guest.name}">${formatGuestDisplayName(guest.name)}</span>`;
+                seatSlot.innerHTML = `<span class="${getGuestNameTextClass(guest.name)}" title="${guest.name}">${formatGuestDisplayName(guest.name)}</span>`;
 
                 bindGuestTap(seatSlot, () => {
                     openGuestModal(guest, tableNum, i);
@@ -1142,6 +1415,9 @@ function renderCanvasTables() {
                         cancelTableDrag();
                         isGuestDragging = true;
                         e.dataTransfer.setData('text/plain', JSON.stringify({ fromTable: tableNum, seatIndex: i, name: guest.name }));
+                    });
+                    seatSlot.addEventListener('drag', (e) => {
+                        openSidebarIfDragEntersSidebar(e.clientX);
                     });
                     seatSlot.addEventListener('dragend', () => {
                         isGuestDragging = false;
@@ -1233,8 +1509,8 @@ function openGuestModal(guest, tableNum, seatIdx, poolIndex) {
     const fromPool = poolIndex != null;
     selectedGuestContext = { guest, tableNum, seatIdx, poolIndex, fromPool };
     document.getElementById('edit-guest-name').value = guest.name;
-    renderModalTags(guest.group);
     document.getElementById('edit-guest-side').value = guest.side === '女方' ? '女方' : '男方';
+    renderModalTags(guest.group);
     document.getElementById('md-guest-seat').innerText = fromPool
         ? '未安排'
         : `第 ${tableNum} 桌 - 座位 ${seatIdx + 1}`;
@@ -1315,6 +1591,11 @@ function handleDropOnSpecificSeat(e, toTableNum, targetSeatIdx) {
         moveGuestToSeat(data, toTableNum, targetSeatIdx);
     } catch (err) { console.error(err); }
 }
+
+document.addEventListener('dragover', (e) => {
+    if (!isGuestDragging) return;
+    openSidebarIfDragEntersSidebar(e.clientX);
+}, { passive: true });
 
 document.addEventListener('dragend', () => {
     isGuestDragging = false;
