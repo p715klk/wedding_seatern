@@ -190,6 +190,13 @@ function getSidebarWidth() {
     return isSidebarOpen ? getSidebarPanelWidth() : 0;
 }
 
+function getSidebarDragOpenThreshold() {
+    if (isMobileViewport()) {
+        return window.innerWidth * 0.20;
+    }
+    return getSidebarPanelWidth() + 16;
+}
+
 function bindGuestTap(element, onTap) {
     const threshold = 14;
     let startX = 0, startY = 0, moved = false;
@@ -797,7 +804,7 @@ function closeSidebar({ instant = false } = {}) {
 
 function openSidebarIfDragEntersSidebar(clientX) {
     if (isSidebarOpen || !isGuestDragging) return;
-    if (clientX <= getSidebarPanelWidth() + 16) {
+    if (clientX <= getSidebarDragOpenThreshold()) {
         openSidebar();
     }
 }
