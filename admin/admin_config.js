@@ -36,6 +36,7 @@ function normalizeTags(val) {
     if (Array.isArray(val)) return val.map(t => String(t).trim()).filter(t => t && t !== '未分類');
     const s = String(val).trim();
     if (!s || s === '未分類') return [];
+    if (s.includes(';')) return s.split(';').map(t => t.trim()).filter(t => t && t !== '未分類');
     if (s.includes('|')) return s.split('|').map(t => t.trim()).filter(t => t && t !== '未分類');
     return [s];
 }

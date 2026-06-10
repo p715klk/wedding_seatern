@@ -152,19 +152,30 @@ function saveAllToFirebase() {
 // ==========================================
 function exportToCSV() {
     if (localGuestsList.length === 0) return;
-    let headers = ["姓名", "來源(男方/女方)", "分配桌次", "標籤(多選以|分隔)"];
+    const headers = ["順序", "桌號", "座位", "姓名", "來源(男方/女方)", "標籤(多選以;分隔)"];
     let csvContent = "\uFEFF" + headers.join(",") + "\n";
-    
+    let seq = 0;
+
     tbody.querySelectorAll('tr').forEach(row => {
         const nameEl = row.querySelector('.row-name-input');
         if (!nameEl) return;
         const name = nameEl.value.trim();
         const table = row.querySelector('.row-table-input').value.trim();
         const side = row.querySelector('.row-side-select').value;
+        const seatInput = row.querySelector('.row-seat-input');
+        const seat = seatInput ? seatInput.value.trim() : '';
 
         if (name) {
+            seq += 1;
             const tags = readTagsFromRow(row, PRIMARY_TAG_KEY);
-            let rowCells = [`"${name}"`, `"${side}"`, `"${table}"`, `"${tags.join('|')}"`];
+            const rowCells = [
+                `"${seq}"`,
+                `"${table}"`,
+                `"${seat}"`,
+                `"${name}"`,
+                `"${side}"`,
+                `"${tags.join(';')}"`
+            ];
             csvContent += rowCells.join(",") + "\n";
         }
     });
@@ -185,29 +196,51 @@ function importCSVAction() {
 
     const reader = new FileReader();
     reader.onload = function (e) {
-        const lines = e.target.result.split('\n');
+        const lines = e.target.result.replace(/^\uFEFF/, '').split('\n');
         let importedGuests = [];
+        const headerLine = (lines[0] || '').trim();
+        const isNewFormat = headerLine.includes('順序') || headerLine.startsWith('順序');
 
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
             const parts = line.split(',');
-            if (parts.length >= 2) {
-                const name = parts[0].replace(/"/g, '').trim();
-                const side = parts[1] ? parts[1].replace(/"/g, '').trim() : '男方';
-                const tableRaw = parts[2] ? parts[2].replace(/"/g, '').trim() : '';
-                const tagsRaw = parts[3] ? parts[3].replace(/"/g, '').trim() : '';
+            const clean = (idx) => (parts[idx] ? parts[idx].replace(/"/g, '').trim() : '');
+
+            if (isNewFormat && parts.length >= 4) {
+                const tableRaw = clean(1);
+                const seatRaw = clean(2);
+                const name = clean(3);
+                const side = clean(4) || '男方';
+                const tagsRaw = clean(5);
+                const seatNum = parseInt(seatRaw, 10);
 
                 if (name) {
                     importedGuests.push({
-                        name: name, side: side,
+                        name,
+                        side,
+                        table: tableRaw !== '' ? parseInt(tableRaw, 10) : '',
+                        sort: !isNaN(seatNum) && seatNum >= 1 ? seatNum : 1,
+                        group: normalizeTags(tagsRaw)
+                    });
+                }
+            } else if (parts.length >= 2) {
+                const name = clean(0);
+                const side = clean(1) || '男方';
+                const tableRaw = clean(2);
+                const tagsRaw = clean(3);
+
+                if (name) {
+                    importedGuests.push({
+                        name,
+                        side,
                         group: normalizeTags(tagsRaw),
-                        table: tableRaw !== "" ? parseInt(tableRaw) : ""
+                        table: tableRaw !== '' ? parseInt(tableRaw, 10) : ''
                     });
                 }
             }
         }
-        localGuestsList = sortGuestsListByTableAndSeat(importedGuests);
+        localGuestsList = isNewFormat ? importedGuests : sortGuestsListByTableAndSeat(importedGuests);
         renderDOMRows();
         recalculateSortNumbersFromDOM();
     };
