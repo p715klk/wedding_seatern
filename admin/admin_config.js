@@ -31,6 +31,29 @@ let categoriesByColumn = {
     'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學']
 };
 
+function normalizeCSVHeaderLabel(label) {
+    return String(label || '')
+        .replace(/^"|"$/g, '')
+        .replace(/\s/g, '')
+        .toLowerCase();
+}
+
+/** 依表頭欄位名稱對應欄位索引，支援新舊 CSV 格式與 Excel 改過的表頭 */
+function buildCSVColumnMap(headers) {
+    const map = {};
+    headers.forEach((raw, index) => {
+        const h = normalizeCSVHeaderLabel(raw);
+        if (!h) return;
+        if (h === '順序' || h === '顺序' || h === 'seq' || h === 'order' || h === '#') map.seq = index;
+        if (/桌號|桌号|枱號|枱号|分配桌次|^table$/.test(h)) map.table = index;
+        if (/^座位$|^座號$|^座号$|^seat$|^sort$/.test(h)) map.seat = index;
+        if (h === '姓名' || h === 'name') map.name = index;
+        if (/來源|来源|男方|女方|^side$/.test(h)) map.side = index;
+        if (/標籤|标签|群組|群组|^group$|^tag/.test(h)) map.tags = index;
+    });
+    return map;
+}
+
 function parseCSVLine(line) {
     const result = [];
     let current = '';
@@ -77,3 +100,4 @@ let scrollContainer = null;
 let activeSelectElement = null; 
 let activeColumnKey = null; 
 let sortableInstance = null;
+let csvImportInProgress = false;

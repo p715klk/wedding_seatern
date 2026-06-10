@@ -30,6 +30,8 @@ function loadFirebaseData(forceRender = false) {
         const unassignedGuests = snapshot2.val() || [];
         tableSettingsCache = snapshot3.val() || {};
 
+        if (csvImportInProgress) return;
+
         if (forceRender || (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT')) {
             processFirebaseData(weddingGuests, unassignedGuests);
         }
@@ -201,6 +203,34 @@ function openCSVFilePicker() {
     fileInput.click();
 }
 
+function parseImportedGuestFromCSVRow(parts, colMap) {
+    const clean = (idx) => {
+        if (idx == null || idx < 0) return '';
+        return (parts[idx] ?? '').replace(/^"|"$/g, '').trim();
+    };
+
+    const name = clean(colMap.name);
+    if (!name) return null;
+
+    const sideRaw = clean(colMap.side);
+    const side = sideRaw === '女方' ? '女方' : (sideRaw === '男方' ? '男方' : (sideRaw || '男方'));
+
+    const tableRaw = clean(colMap.table);
+    const seatRaw = clean(colMap.seat);
+    const tableNum = parseInt(tableRaw, 10);
+    const seatNum = parseInt(seatRaw, 10);
+    const hasTable = tableRaw !== '' && !isNaN(tableNum) && tableNum >= 1;
+    const hasSeat = seatRaw !== '' && !isNaN(seatNum) && seatNum >= 1;
+
+    return {
+        name,
+        side,
+        table: hasTable ? tableNum : '',
+        sort: hasTable ? (hasSeat ? seatNum : 1) : 99,
+        group: normalizeTags(clean(colMap.tags))
+    };
+}
+
 function importCSVAction() {
     const fileInput = document.getElementById('csv-file-input');
     const file = fileInput.files[0];
@@ -208,78 +238,70 @@ function importCSVAction() {
 
     const reader = new FileReader();
     reader.onload = function (e) {
-        const lines = e.target.result.replace(/^\uFEFF/, '').split(/\r?\n/);
-        let importedGuests = [];
-        const headerParts = parseCSVLine((lines[0] || '').trim());
-        const isNewFormat = headerParts[0] === '順序' || headerParts.includes('桌號');
+        const lines = e.target.result.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
+        if (lines.length === 0) {
+            alert('❌ CSV 檔案是空的。');
+            return;
+        }
 
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-            const parts = parseCSVLine(line);
-            const clean = (idx) => (parts[idx] ?? '').replace(/^"|"$/g, '').trim();
+        const headerParts = parseCSVLine(lines[0].trim());
+        let colMap = buildCSVColumnMap(headerParts);
 
-            if (isNewFormat && parts.length >= 4) {
-                const tableRaw = clean(1);
-                const seatRaw = clean(2);
-                const name = clean(3);
-                const side = clean(4) || '男方';
-                const tagsRaw = clean(5);
-                const tableNum = parseInt(tableRaw, 10);
-                const seatNum = parseInt(seatRaw, 10);
-                const hasTable = tableRaw !== '' && !isNaN(tableNum);
-                const hasSeat = seatRaw !== '' && !isNaN(seatNum) && seatNum >= 1;
-                const isAssigned = hasTable && hasSeat;
-
-                if (name) {
-                    importedGuests.push({
-                        name,
-                        side,
-                        table: isAssigned ? tableNum : '',
-                        sort: isAssigned ? seatNum : 99,
-                        group: normalizeTags(tagsRaw)
-                    });
-                }
-            } else if (parts.length >= 2) {
-                const name = clean(0);
-                const side = clean(1) || '男方';
-                const tableRaw = clean(2);
-                const tagsRaw = clean(3);
-
-                if (name) {
-                    importedGuests.push({
-                        name,
-                        side,
-                        group: normalizeTags(tagsRaw),
-                        table: tableRaw !== '' && !isNaN(parseInt(tableRaw, 10)) ? parseInt(tableRaw, 10) : ''
-                    });
-                }
+        // 無表頭或表頭無法辨識時，假設為匯出格式：順序,桌號,座位,姓名,來源,標籤
+        const firstDataParts = lines.length > 1 ? parseCSVLine(lines[1].trim()) : [];
+        if (colMap.name == null) {
+            const looksLikeNewExport = firstDataParts.length >= 4
+                && !isNaN(parseInt(firstDataParts[0], 10))
+                && !isNaN(parseInt(firstDataParts[1], 10));
+            if (looksLikeNewExport) {
+                colMap = { seq: 0, table: 1, seat: 2, name: 3, side: 4, tags: 5 };
+            } else {
+                // 舊格式：姓名,來源,群組,分配桌次
+                colMap = { name: 0, side: 1, tags: 2, table: 3 };
             }
+        }
+
+        const dataStartIndex = colMap.name != null && buildCSVColumnMap(headerParts).name != null ? 1 : 0;
+        let importedGuests = [];
+        let assignedCount = 0;
+
+        for (let i = dataStartIndex; i < lines.length; i++) {
+            const parts = parseCSVLine(lines[i].trim());
+            const guest = parseImportedGuestFromCSVRow(parts, colMap);
+            if (!guest) continue;
+            if (guest.table !== '' && guest.table != null) assignedCount += 1;
+            importedGuests.push(guest);
         }
 
         fileInput.value = '';
 
         if (importedGuests.length === 0) {
-            alert('❌ 未能讀取任何賓客資料，請確認 CSV 格式是否正確。');
+            alert('❌ 未能讀取任何賓客資料，請確認 CSV 格式是否正確。\n\n預期表頭包含：桌號、座位、姓名（或舊版：姓名、分配桌次）');
             return;
         }
 
-        localGuestsList = isNewFormat ? importedGuests : sortGuestsListByTableAndSeat(importedGuests);
+        csvImportInProgress = true;
+        localGuestsList = sortGuestsListByTableAndSeat(importedGuests);
+        renderThead();
         renderDOMRows();
         refreshRowSequenceNumbersOnly();
 
         const assignedTables = importedGuests.map(g => g.table).filter(t => t !== '' && t != null);
         const focusTable = assignedTables.length ? assignedTables[assignedTables.length - 1] : null;
+        const unassignedCount = importedGuests.length - assignedCount;
 
         saveAllToFirebase({
-            successMessage: `✅ 已匯入並同步 ${importedGuests.length} 位賓客至 Firebase！\n\n畫布排位頁面亦會更新。`,
+            successMessage: `✅ 已匯入並同步 ${importedGuests.length} 位賓客至 Firebase！\n\n• 已分配枱位：${assignedCount} 位\n• 未分配：${unassignedCount} 位\n\n畫布排位頁面亦會更新。`,
             reloadAfterSave: true
         }).then(() => {
             if (focusTable) scrollToTableInList(focusTable);
+        }).finally(() => {
+            csvImportInProgress = false;
         });
     };
     reader.onerror = function () {
         fileInput.value = '';
+        csvImportInProgress = false;
         alert('❌ 讀取 CSV 檔案失敗，請重試。');
     };
     reader.readAsText(file, 'UTF-8');
