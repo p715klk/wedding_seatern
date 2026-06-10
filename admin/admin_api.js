@@ -1,10 +1,10 @@
 // ==========================================
 // 📌 2. Firebase 精準讀取與多重標籤解析
 // ==========================================
-function loadFirebaseData() {
+function loadFirebaseData(forceRender = false) {
     tbody.innerHTML = `<tr><td class="text-center py-8 text-gray-400 font-bold">⏳ 正在從 Firebase 載入名單數據...</td></tr>`;
-    
-    database.ref('meta_label_columns').once('value').then(metaSnapshot => {
+
+    return database.ref('meta_label_columns').once('value').then(metaSnapshot => {
         const meta = metaSnapshot.val();
         if (meta && meta.keys && meta.names) {
             const legacyKeys = meta.keys;
@@ -30,12 +30,13 @@ function loadFirebaseData() {
         const unassignedGuests = snapshot2.val() || [];
         tableSettingsCache = snapshot3.val() || {};
 
-        if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+        if (forceRender || (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT')) {
             processFirebaseData(weddingGuests, unassignedGuests);
         }
     }).catch(err => {
         console.error("Firebase 載入失敗:", err);
         tbody.innerHTML = `<tr><td class="text-center py-8 text-red-500 font-bold">❌ 數據載入失敗</td></tr>`;
+        throw err;
     });
 }
 
@@ -98,9 +99,10 @@ function processFirebaseData(weddingGuests, unassignedGuests) {
 // ==========================================
 // 📌 3. 儲存雙節點與欄位架構
 // ==========================================
-function saveAllToFirebase() {
+function saveAllToFirebase(options = {}) {
+    const { successMessage = null, reloadAfterSave = true } = options;
     const rows = tbody.querySelectorAll('tr');
-    let newWeddingGuests = {};   
+    let newWeddingGuests = {};
     let newUnassignedGuests = [];
 
     database.ref('meta_label_columns').set({
@@ -119,7 +121,7 @@ function saveAllToFirebase() {
         const seatInput = row.querySelector('.row-seat-input');
         const gSeatRaw = seatInput ? seatInput.value.trim() : '';
 
-        if (!gName) return; 
+        if (!gName) return;
 
         let guestData = { name: gName, side: gSide };
         const tags = readTagsFromRow(row, PRIMARY_TAG_KEY);
@@ -138,13 +140,17 @@ function saveAllToFirebase() {
         }
     });
 
-    Promise.all([
+    return Promise.all([
         database.ref('wedding_guests').set(newWeddingGuests),
         database.ref('unassigned_guests').set(newUnassignedGuests)
     ]).then(() => {
-        alert("✨ 【後台數據同步成功】！已完美推送至畫布。");
-        loadFirebaseData();
-    }).catch(err => alert("❌ 儲存失敗: " + err.message));
+        if (reloadAfterSave) return loadFirebaseData(true);
+    }).then(() => {
+        if (successMessage) alert(successMessage);
+    }).catch(err => {
+        alert("❌ 儲存失敗: " + err.message);
+        throw err;
+    });
 }
 
 // ==========================================
@@ -257,7 +263,16 @@ function importCSVAction() {
         localGuestsList = isNewFormat ? importedGuests : sortGuestsListByTableAndSeat(importedGuests);
         renderDOMRows();
         refreshRowSequenceNumbersOnly();
-        alert(`✅ 已匯入 ${importedGuests.length} 位賓客。\n\n請檢查名單後按「💾 儲存變更」同步至 Firebase。`);
+
+        const assignedTables = importedGuests.map(g => g.table).filter(t => t !== '' && t != null);
+        const focusTable = assignedTables.length ? assignedTables[assignedTables.length - 1] : null;
+
+        saveAllToFirebase({
+            successMessage: `✅ 已匯入並同步 ${importedGuests.length} 位賓客至 Firebase！\n\n畫布排位頁面亦會更新。`,
+            reloadAfterSave: true
+        }).then(() => {
+            if (focusTable) scrollToTableInList(focusTable);
+        });
     };
     reader.onerror = function () {
         fileInput.value = '';

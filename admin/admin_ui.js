@@ -295,6 +295,39 @@ function renderDOMRows() {
         `;
         tbody.appendChild(tr);
     });
+    reinitTableSortable();
+}
+
+function scrollToTableInList(tableNum) {
+    if (!tbody || !scrollContainer) return;
+    const target = parseInt(tableNum, 10);
+    if (isNaN(target)) return;
+
+    for (const row of tbody.querySelectorAll('tr')) {
+        const tableInput = row.querySelector('.row-table-input');
+        if (!tableInput || parseInt(tableInput.value, 10) !== target) continue;
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.classList.add('ring-2', 'ring-yellow-400', 'bg-yellow-50');
+        setTimeout(() => row.classList.remove('ring-2', 'ring-yellow-400', 'bg-yellow-50'), 2500);
+        break;
+    }
+}
+
+function reinitTableSortable() {
+    if (sortableInstance) {
+        sortableInstance.destroy();
+        sortableInstance = null;
+    }
+    if (typeof Sortable !== 'undefined' && tbody) {
+        sortableInstance = Sortable.create(tbody, {
+            handle: '.drag-handle',
+            animation: 150,
+            ghostClass: 'sortable-ghost',
+            onEnd: function () {
+                recalculateSortNumbersFromDOM();
+            }
+        });
+    }
 }
 
 function addNewGuestRow() {
@@ -470,15 +503,6 @@ document.addEventListener('DOMContentLoaded', () => {
     tbody = document.getElementById('excel-tbody');
     scrollContainer = document.getElementById('table-scroll-container');
 
-    if (typeof Sortable !== 'undefined' && tbody) {
-        sortableInstance = Sortable.create(tbody, {
-            handle: '.drag-handle',
-            animation: 150,
-            ghostClass: 'sortable-ghost',
-            onEnd: function () {
-                recalculateSortNumbersFromDOM();
-            }
-        });
-    }
+    reinitTableSortable();
     loadFirebaseData();
 });
