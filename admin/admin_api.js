@@ -225,14 +225,18 @@ function importCSVAction() {
                 const name = clean(3);
                 const side = clean(4) || '男方';
                 const tagsRaw = clean(5);
+                const tableNum = parseInt(tableRaw, 10);
                 const seatNum = parseInt(seatRaw, 10);
+                const hasTable = tableRaw !== '' && !isNaN(tableNum);
+                const hasSeat = seatRaw !== '' && !isNaN(seatNum) && seatNum >= 1;
+                const isAssigned = hasTable && hasSeat;
 
                 if (name) {
                     importedGuests.push({
                         name,
                         side,
-                        table: tableRaw !== '' && !isNaN(parseInt(tableRaw, 10)) ? parseInt(tableRaw, 10) : '',
-                        sort: !isNaN(seatNum) && seatNum >= 1 ? seatNum : 1,
+                        table: isAssigned ? tableNum : '',
+                        sort: isAssigned ? seatNum : 99,
                         group: normalizeTags(tagsRaw)
                     });
                 }
