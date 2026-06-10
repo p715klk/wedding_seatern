@@ -412,13 +412,55 @@ function syncSeatCellForRow(row) {
     txtCell.innerHTML = buildSeatCellContent(tableNum, seatVal);
 }
 
+function setSeatValueForRow(row, tableNum, seatNum) {
+    const txtCell = row.querySelector('.row-seat-txt-cell');
+    if (!txtCell) return;
+
+    const existingSeat = row.querySelector('.row-seat-input');
+    const displayNum = txtCell.querySelector('.row-table-display-num');
+    const prevTable = displayNum ? parseInt(displayNum.textContent, 10) : NaN;
+    const maxSeats = getMaxSeatsForTable(tableNum);
+    const seatVal = Math.min(maxSeats, Math.max(1, seatNum));
+
+    if (existingSeat && prevTable === tableNum) {
+        existingSeat.value = seatVal;
+        existingSeat.max = maxSeats;
+        if (displayNum) displayNum.textContent = tableNum;
+        return;
+    }
+
+    txtCell.innerHTML = buildSeatCellContent(tableNum, seatVal);
+}
+
+function reassignSeatsByDomOrderPerTable() {
+    const tableSeatCounter = {};
+
+    tbody.querySelectorAll('tr').forEach(row => {
+        if (!row.querySelector('.row-name-input')) return;
+
+        const tableInput = row.querySelector('.row-table-input');
+        const txtCell = row.querySelector('.row-seat-txt-cell');
+        if (!tableInput || !txtCell) return;
+
+        const tVal = tableInput.value.trim();
+        if (tVal === '' || isNaN(tVal)) {
+            txtCell.innerHTML = '<span class="text-gray-400">未安排</span>';
+            return;
+        }
+
+        const tableNum = parseInt(tVal, 10);
+        tableSeatCounter[tableNum] = (tableSeatCounter[tableNum] || 0) + 1;
+        setSeatValueForRow(row, tableNum, tableSeatCounter[tableNum]);
+    });
+}
+
 function recalculateSortNumbersFromDOM() {
     const rows = tbody.querySelectorAll('tr');
     rows.forEach((row, idx) => {
         const numEl = row.querySelector('.row-sort-num');
         if (numEl) numEl.innerText = idx + 1;
-        syncSeatCellForRow(row);
     });
+    reassignSeatsByDomOrderPerTable();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
