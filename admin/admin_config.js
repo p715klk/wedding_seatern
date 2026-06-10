@@ -31,6 +31,30 @@ let categoriesByColumn = {
     'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學']
 };
 
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+                current += '"';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+            }
+        } else if (ch === ',' && !inQuotes) {
+            result.push(current);
+            current = '';
+        } else {
+            current += ch;
+        }
+    }
+    result.push(current);
+    return result.map(s => s.trim());
+}
+
 function normalizeTags(val) {
     if (!val) return [];
     if (Array.isArray(val)) return val.map(t => String(t).trim()).filter(t => t && t !== '未分類');

@@ -454,12 +454,15 @@ function reassignSeatsByDomOrderPerTable() {
     });
 }
 
-function recalculateSortNumbersFromDOM() {
-    const rows = tbody.querySelectorAll('tr');
-    rows.forEach((row, idx) => {
+function refreshRowSequenceNumbersOnly() {
+    tbody.querySelectorAll('tr').forEach((row, idx) => {
         const numEl = row.querySelector('.row-sort-num');
         if (numEl) numEl.innerText = idx + 1;
     });
+}
+
+function recalculateSortNumbersFromDOM() {
+    refreshRowSequenceNumbersOnly();
     reassignSeatsByDomOrderPerTable();
 }
 

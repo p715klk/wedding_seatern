@@ -189,6 +189,12 @@ function exportToCSV() {
     document.body.removeChild(link);
 }
 
+function openCSVFilePicker() {
+    const fileInput = document.getElementById('csv-file-input');
+    fileInput.value = '';
+    fileInput.click();
+}
+
 function importCSVAction() {
     const fileInput = document.getElementById('csv-file-input');
     const file = fileInput.files[0];
@@ -196,16 +202,16 @@ function importCSVAction() {
 
     const reader = new FileReader();
     reader.onload = function (e) {
-        const lines = e.target.result.replace(/^\uFEFF/, '').split('\n');
+        const lines = e.target.result.replace(/^\uFEFF/, '').split(/\r?\n/);
         let importedGuests = [];
-        const headerLine = (lines[0] || '').trim();
-        const isNewFormat = headerLine.includes('順序') || headerLine.startsWith('順序');
+        const headerParts = parseCSVLine((lines[0] || '').trim());
+        const isNewFormat = headerParts[0] === '順序' || headerParts.includes('桌號');
 
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
-            const parts = line.split(',');
-            const clean = (idx) => (parts[idx] ? parts[idx].replace(/"/g, '').trim() : '');
+            const parts = parseCSVLine(line);
+            const clean = (idx) => (parts[idx] ?? '').replace(/^"|"$/g, '').trim();
 
             if (isNewFormat && parts.length >= 4) {
                 const tableRaw = clean(1);
@@ -219,7 +225,7 @@ function importCSVAction() {
                     importedGuests.push({
                         name,
                         side,
-                        table: tableRaw !== '' ? parseInt(tableRaw, 10) : '',
+                        table: tableRaw !== '' && !isNaN(parseInt(tableRaw, 10)) ? parseInt(tableRaw, 10) : '',
                         sort: !isNaN(seatNum) && seatNum >= 1 ? seatNum : 1,
                         group: normalizeTags(tagsRaw)
                     });
@@ -235,14 +241,27 @@ function importCSVAction() {
                         name,
                         side,
                         group: normalizeTags(tagsRaw),
-                        table: tableRaw !== '' ? parseInt(tableRaw, 10) : ''
+                        table: tableRaw !== '' && !isNaN(parseInt(tableRaw, 10)) ? parseInt(tableRaw, 10) : ''
                     });
                 }
             }
         }
+
+        fileInput.value = '';
+
+        if (importedGuests.length === 0) {
+            alert('❌ 未能讀取任何賓客資料，請確認 CSV 格式是否正確。');
+            return;
+        }
+
         localGuestsList = isNewFormat ? importedGuests : sortGuestsListByTableAndSeat(importedGuests);
         renderDOMRows();
-        recalculateSortNumbersFromDOM();
+        refreshRowSequenceNumbersOnly();
+        alert(`✅ 已匯入 ${importedGuests.length} 位賓客。\n\n請檢查名單後按「💾 儲存變更」同步至 Firebase。`);
+    };
+    reader.onerror = function () {
+        fileInput.value = '';
+        alert('❌ 讀取 CSV 檔案失敗，請重試。');
     };
     reader.readAsText(file, 'UTF-8');
 }

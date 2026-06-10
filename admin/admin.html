@@ -30,7 +30,7 @@
                 
                 <div class="flex items-center bg-gray-200 rounded-lg p-1 border border-gray-300 gap-1">
                     <input type="file" id="csv-file-input" accept=".csv" class="hidden" onchange="importCSVAction()">
-                    <button onclick="document.getElementById('csv-file-input').click()" class="bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 rounded text-xs font-bold transition">
+                    <button onclick="openCSVFilePicker()" class="bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 rounded text-xs font-bold transition">
                         📥 匯入 CSV
                     </button>
                     <button onclick="exportToCSV()" class="bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 rounded text-xs font-bold transition">
