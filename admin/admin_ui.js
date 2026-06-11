@@ -26,18 +26,40 @@ function readTagsFromRow(row, columnKey) {
     return [...container.querySelectorAll('.tag-chip')].map(chip => chip.dataset.tag);
 }
 
-function buildTagChipHTML(tag, columnKey) {
-    const safe = tag.replace(/"/g, '&quot;');
-    return `<span class="tag-chip inline-flex items-center gap-0.5 bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-bold" data-tag="${safe}">${tag}<button type="button" onclick="removeTagFromRow(this,'${columnKey}')" class="text-red-500 hover:text-red-700 font-black leading-none">×</button></span>`;
+function getRowGuestSide(row) {
+    const el = row && row.querySelector('.row-side-select');
+    return el && el.value === '女方' ? '女方' : '男方';
 }
 
-function buildTagAddSelectHTML(columnKey, selectedTags) {
+function tagChipSideClasses(side) {
+    if (side === '女方') {
+        return {
+            chip: 'bg-rose-100 text-rose-800',
+            btn: 'text-rose-500 hover:text-rose-700',
+            select: 'border-rose-200 bg-rose-50/20'
+        };
+    }
+    return {
+        chip: 'bg-blue-100 text-blue-800',
+        btn: 'text-blue-500 hover:text-blue-700',
+        select: 'border-blue-200 bg-blue-50/20'
+    };
+}
+
+function buildTagChipHTML(tag, columnKey, side = '男方') {
+    const safe = tag.replace(/"/g, '&quot;');
+    const c = tagChipSideClasses(side);
+    return `<span class="tag-chip inline-flex items-center gap-0.5 ${c.chip} px-1.5 py-0.5 rounded font-bold" data-tag="${safe}">${tag}<button type="button" onclick="removeTagFromRow(this,'${columnKey}')" class="${c.btn} font-black leading-none">×</button></span>`;
+}
+
+function buildTagAddSelectHTML(columnKey, selectedTags, side = '男方') {
     const optionsArr = categoriesByColumn[columnKey] || ['未分類'];
     const available = optionsArr.filter(cat => !selectedTags.includes(cat));
+    const c = tagChipSideClasses(side);
     let optsHTML = `<option value="">＋</option>`;
     optsHTML += available.map(cat => `<option value="${cat}">${cat}</option>`).join('');
     optsHTML += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>`;
-    return `<select onchange="handleTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border border-red-200 bg-red-50/20 rounded px-1 py-0.5 font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
+    return `<select onchange="handleTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border ${c.select} rounded px-1 py-0.5 font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
 }
 
 function buildNumberSpinInputHTML({ value = '', min = 1, max = 99, inputClass, oninput = '' }) {
@@ -103,16 +125,25 @@ function stepTableInput(btn, delta) {
     stepNumberSpinInput(btn, delta);
 }
 
-function buildMultiTagCellHTML(columnKey, tags) {
-    const chips = tags.map(t => buildTagChipHTML(t, columnKey)).join('');
+function buildMultiTagCellHTML(columnKey, tags, side = '男方') {
+    const chips = tags.map(t => buildTagChipHTML(t, columnKey, side)).join('');
     return `
         <td class="py-2 px-2 align-middle">
             <div class="row-multi-tags flex flex-wrap items-center gap-1" data-column-key="${columnKey}">
                 ${chips}
-                ${buildTagAddSelectHTML(columnKey, tags)}
+                ${buildTagAddSelectHTML(columnKey, tags, side)}
             </div>
         </td>
     `;
+}
+
+function refreshRowTagColors(row) {
+    const container = row.querySelector(`.row-multi-tags[data-column-key="${PRIMARY_TAG_KEY}"]`);
+    if (!container) return;
+    const tags = readTagsFromRow(row, PRIMARY_TAG_KEY);
+    const side = getRowGuestSide(row);
+    const chips = tags.map(t => buildTagChipHTML(t, PRIMARY_TAG_KEY, side)).join('');
+    container.innerHTML = chips + buildTagAddSelectHTML(PRIMARY_TAG_KEY, tags, side);
 }
 
 function insertTagChipBeforeSelect(row, columnKey, tag) {
@@ -120,7 +151,7 @@ function insertTagChipBeforeSelect(row, columnKey, tag) {
     if (!select) return;
     const current = readTagsFromRow(row, columnKey);
     if (!current.includes(tag)) {
-        select.insertAdjacentHTML('beforebegin', buildTagChipHTML(tag, columnKey));
+        select.insertAdjacentHTML('beforebegin', buildTagChipHTML(tag, columnKey, getRowGuestSide(row)));
     }
 }
 
@@ -128,7 +159,7 @@ function refreshTagAddSelect(row, columnKey) {
     const select = row.querySelector(`.row-tag-add-select-${columnKey}`);
     if (!select) return;
     const selected = readTagsFromRow(row, columnKey);
-    select.outerHTML = buildTagAddSelectHTML(columnKey, selected);
+    select.outerHTML = buildTagAddSelectHTML(columnKey, selected, getRowGuestSide(row));
 }
 
 function refreshAllTagAddSelects(columnKey) {
@@ -261,7 +292,7 @@ function renderDOMRows() {
         tr.className = "hover:bg-gray-50 transition bg-white";
         
         const sideSelectHTML = `
-            <select class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-side-select">
+            <select onchange="refreshRowTagColors(this.closest('tr'))" class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-side-select">
                 <option value="男方" ${guest.side === '男方' ? 'selected' : ''}>男方</option>
                 <option value="女方" ${guest.side === '女方' ? 'selected' : ''}>女方</option>
             </select>
@@ -274,7 +305,8 @@ function renderDOMRows() {
             const pool = categoriesByColumn[PRIMARY_TAG_KEY] || [];
             if (!pool.includes(t)) pool.push(t);
         });
-        const labelsTdHTML = buildMultiTagCellHTML(PRIMARY_TAG_KEY, tags);
+        const guestSide = guest.side === '女方' ? '女方' : '男方';
+        const labelsTdHTML = buildMultiTagCellHTML(PRIMARY_TAG_KEY, tags, guestSide);
         const seatCellHTML = guest.table
             ? buildSeatCellContent(guest.table, guest.sort || 1)
             : '<span class="text-gray-400">未安排</span>';
@@ -337,7 +369,7 @@ function addNewGuestRow() {
     tr.className = "hover:bg-gray-50 transition bg-white";
 
     const sideSelectHTML = `
-        <select class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-side-select">
+        <select onchange="refreshRowTagColors(this.closest('tr'))" class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-side-select">
             <option value="男方" selected>男方</option>
             <option value="女方">女方</option>
         </select>
