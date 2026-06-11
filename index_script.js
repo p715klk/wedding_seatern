@@ -5,14 +5,9 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-// 簽到頁預設排位（Firebase 未有 floor_layout 時使用）
-const DEFAULT_FLOOR_LAYOUT = [
-    ['.', '1', '2', '.'],
-    ['.', '3', '4', '.'],
-    ['11', '5', '6', '13'],
-    ['12', '7', '8', '14'],
-    ['.', '9', '10', '.']
-];
+const FLOOR_GRID_COLS = 4;
+const TABLE_PLATE_CENTER = 210;
+const EMPTY_FLOOR_LAYOUT = [['.', '.', '.', '.']];
 
 let dbData = {};
 let statusState = {};
@@ -46,11 +41,6 @@ function guestMatchesKeyword(guest, keyword) {
     return name.includes(keyword) || side.includes(keyword) || tags.some(t => t.toLowerCase().includes(keyword));
 }
 
-function isValidFloorLayout(layout) {
-    if (!Array.isArray(layout) || !layout.length) return false;
-    return layout.every(row => Array.isArray(row) && row.length === 4);
-}
-
 function normalizeTableSettings(raw) {
     const normalized = {};
     if (!raw) return normalized;
@@ -69,23 +59,99 @@ function normalizeTableSettings(raw) {
     return normalized;
 }
 
-function getActiveTableNums(tableSettingsRaw) {
-    return new Set(Object.keys(normalizeTableSettings(tableSettingsRaw)));
+function makeEmptyFloorRow() {
+    return ['.', '.', '.', '.'];
 }
 
-function filterFloorLayoutByActiveTables(layout, tableSettingsRaw) {
-    const active = getActiveTableNums(tableSettingsRaw);
-    const base = isValidFloorLayout(layout) ? layout : DEFAULT_FLOOR_LAYOUT;
-    return base.map(row =>
-        row.map(cell => {
-            if (cell === '.' || cell === '') return '.';
-            return active.has(String(cell)) ? String(cell) : '.';
-        })
-    );
+function resolveFloorGridColumn(row, preferredCol) {
+    if (row[preferredCol] === '.') return preferredCol;
+    for (let d = 1; d < FLOOR_GRID_COLS; d++) {
+        if (preferredCol - d >= 0 && row[preferredCol - d] === '.') return preferredCol - d;
+        if (preferredCol + d < FLOOR_GRID_COLS && row[preferredCol + d] === '.') return preferredCol + d;
+    }
+    for (let c = 0; c < FLOOR_GRID_COLS; c++) {
+        if (row[c] === '.') return c;
+    }
+    return preferredCol;
+}
+
+// 與 seating.js 相同：依 table_settings 座標動態生成，枱數不限
+function computeFloorLayoutFromTableSettings(settings) {
+    const normalized = normalizeTableSettings(settings);
+    const nums = Object.keys(normalized);
+    if (!nums.length) return [makeEmptyFloorRow()];
+
+    const tables = nums.map(num => ({
+        num: String(num),
+        cx: normalized[num].x + TABLE_PLATE_CENTER,
+        cy: normalized[num].y + TABLE_PLATE_CENTER
+    }));
+
+    tables.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
+
+    const yBuckets = [...new Set(tables.map(t => Math.round(t.cy / 50) * 50))].sort((a, b) => a - b);
+    let rowThreshold = 280;
+    if (yBuckets.length > 1) {
+        const gaps = [];
+        for (let i = 1; i < yBuckets.length; i++) gaps.push(yBuckets[i] - yBuckets[i - 1]);
+        gaps.sort((a, b) => a - b);
+        rowThreshold = Math.max(180, Math.min(400, gaps[Math.floor(gaps.length / 2)] * 0.55));
+    }
+
+    const canvasRows = [];
+    let bucket = [];
+    let rowCenterY = null;
+
+    tables.forEach(t => {
+        if (rowCenterY === null || Math.abs(t.cy - rowCenterY) > rowThreshold) {
+            if (bucket.length) canvasRows.push(bucket);
+            bucket = [t];
+            rowCenterY = t.cy;
+        } else {
+            bucket.push(t);
+            rowCenterY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
+        }
+    });
+    if (bucket.length) canvasRows.push(bucket);
+
+    const allCx = tables.map(t => t.cx);
+    const globalMinX = Math.min(...allCx);
+    const globalMaxX = Math.max(...allCx);
+
+    function assignColumn(cx, rowMinX, rowMaxX, countInChunk) {
+        if (countInChunk <= 1) {
+            const span = Math.max(globalMaxX - globalMinX, 1);
+            return Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.round(((cx - globalMinX) / span) * (FLOOR_GRID_COLS - 1))));
+        }
+        const span = Math.max(rowMaxX - rowMinX, 1);
+        return Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.round(((cx - rowMinX) / span) * (FLOOR_GRID_COLS - 1))));
+    }
+
+    const layout = [];
+
+    canvasRows.forEach(rowTables => {
+        rowTables.sort((a, b) => a.cx - b.cx);
+        const rowMinX = rowTables[0].cx;
+        const rowMaxX = rowTables[rowTables.length - 1].cx;
+
+        for (let i = 0; i < rowTables.length; i += FLOOR_GRID_COLS) {
+            const chunk = rowTables.slice(i, i + FLOOR_GRID_COLS);
+            const gridRow = makeEmptyFloorRow();
+
+            chunk.forEach(t => {
+                const col = resolveFloorGridColumn(gridRow, assignColumn(t.cx, rowMinX, rowMaxX, chunk.length));
+                if (gridRow[col] === '.') gridRow[col] = t.num;
+            });
+
+            layout.push(gridRow);
+        }
+    });
+
+    return layout.length ? layout : [makeEmptyFloorRow()];
 }
 
 function renderFloorPlan(layout) {
-    const grid = Array.isArray(layout) && layout.length ? layout : DEFAULT_FLOOR_LAYOUT;
+    const grid = Array.isArray(layout) && layout.length ? layout : EMPTY_FLOOR_LAYOUT;
     floorPlan.innerHTML = '';
     grid.forEach(row => {
         row.forEach(cell => {
@@ -106,15 +172,15 @@ function renderFloorPlan(layout) {
     });
 }
 
-renderFloorPlan(DEFAULT_FLOOR_LAYOUT);
+renderFloorPlan(EMPTY_FLOOR_LAYOUT);
 
-// Firebase 即時監聽
+// Firebase 即時監聽 — 排位跟 table_settings 動態更新
 database.ref().on('value', (snapshot) => {
     const root = snapshot.val() || {};
     dbData = root.wedding_guests || {};
     statusState = root.guest_status || {};
 
-    const layout = filterFloorLayoutByActiveTables(root.floor_layout, root.table_settings);
+    const layout = computeFloorLayoutFromTableSettings(root.table_settings);
     const layoutJson = JSON.stringify(layout);
     if (layoutJson !== currentFloorLayoutJson) {
         currentFloorLayoutJson = layoutJson;
@@ -325,7 +391,7 @@ function handleSearch() {
                 
                 let rawArrived = statusState[key]?.arrived;
                 let currentArrivedStatus = '未到';
-                if (rawArrived === true || rawArrived === '已到') currentArrivedStatus = '停到'; // 修正變量語意
+                if (rawArrived === true || rawArrived === '已到') currentArrivedStatus = '停到';
                 if (rawArrived === true || rawArrived === '已到') currentArrivedStatus = '已到';
                 else if (rawArrived === '取消') currentArrivedStatus = '取消';
                 
@@ -403,26 +469,22 @@ function openModalAndHighlight(tableNum) {
 (function() {
     let indexLastTouchEnd = 0;
 
-    // 1. 攔截雙指放大手勢觸發
     document.addEventListener('touchstart', function (event) {
         if (event.touches.length > 1) {
             event.preventDefault();
         }
     }, { passive: false });
 
-    // 2. 🚨 修正：加入安全保護機制，避免在非 Safari 的電腦瀏覽器報錯
     document.addEventListener('touchmove', function (event) {
         if (event.scale !== undefined && event.scale !== 1) {
             event.preventDefault();
         }
     }, { passive: false });
 
-    // 3. 攔截 iOS 專屬雙指手勢
     document.addEventListener('gesturestart', function (event) {
         event.preventDefault();
     }, { passive: false });
 
-    // 4. 攔截快速連點兩下 (Double-tap)
     document.addEventListener('touchend', function (event) {
         const now = (new Date()).getTime();
         if (now - indexLastTouchEnd <= 300) {
@@ -432,10 +494,8 @@ function openModalAndHighlight(tableNum) {
     }, false);
 })();
 
-// 🔒 阻擋右鍵選單
 document.addEventListener('contextmenu', event => event.preventDefault());
 
-// 🔒 阻擋常用開發者工具快捷鍵 (F12, Ctrl+Shift+I, Ctrl+Shift+C, Ctrl+U 睇 Source)
 document.addEventListener('keydown', event => {
     if (
         event.key === 'F12' ||

@@ -618,23 +618,101 @@ function zoomCanvas(factor) {
     );
 }
 
-// 簽到頁固定格子排位（畫布拖枱唔會改呢個模板，只會按現有枱號過濾）
-const SIGNIN_FLOOR_LAYOUT = [
-    ['.', '1', '2', '.'],
-    ['.', '3', '4', '.'],
-    ['11', '5', '6', '13'],
-    ['12', '7', '8', '14'],
-    ['.', '9', '10', '.']
-];
+const FLOOR_GRID_COLS = 4;
+
+function makeEmptyFloorRow() {
+    return ['.', '.', '.', '.'];
+}
+
+function resolveFloorGridColumn(row, preferredCol) {
+    if (row[preferredCol] === '.') return preferredCol;
+    for (let d = 1; d < FLOOR_GRID_COLS; d++) {
+        if (preferredCol - d >= 0 && row[preferredCol - d] === '.') return preferredCol - d;
+        if (preferredCol + d < FLOOR_GRID_COLS && row[preferredCol + d] === '.') return preferredCol + d;
+    }
+    for (let c = 0; c < FLOOR_GRID_COLS; c++) {
+        if (row[c] === '.') return c;
+    }
+    return preferredCol;
+}
+
+// 依 seating 畫布 x/y 座標推算簽到頁 4 欄排位（枱數不限）
+function computeFloorLayoutFromTableSettings(settings) {
+    const normalized = normalizeTableSettings(settings);
+    const nums = Object.keys(normalized);
+    if (!nums.length) return [makeEmptyFloorRow()];
+
+    const tables = nums.map(num => ({
+        num: String(num),
+        cx: normalized[num].x + PLATE_CENTER,
+        cy: normalized[num].y + PLATE_CENTER
+    }));
+
+    tables.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
+
+    const yBuckets = [...new Set(tables.map(t => Math.round(t.cy / 50) * 50))].sort((a, b) => a - b);
+    let rowThreshold = 280;
+    if (yBuckets.length > 1) {
+        const gaps = [];
+        for (let i = 1; i < yBuckets.length; i++) gaps.push(yBuckets[i] - yBuckets[i - 1]);
+        gaps.sort((a, b) => a - b);
+        rowThreshold = Math.max(180, Math.min(400, gaps[Math.floor(gaps.length / 2)] * 0.55));
+    }
+
+    const canvasRows = [];
+    let bucket = [];
+    let rowCenterY = null;
+
+    tables.forEach(t => {
+        if (rowCenterY === null || Math.abs(t.cy - rowCenterY) > rowThreshold) {
+            if (bucket.length) canvasRows.push(bucket);
+            bucket = [t];
+            rowCenterY = t.cy;
+        } else {
+            bucket.push(t);
+            rowCenterY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
+        }
+    });
+    if (bucket.length) canvasRows.push(bucket);
+
+    const allCx = tables.map(t => t.cx);
+    const globalMinX = Math.min(...allCx);
+    const globalMaxX = Math.max(...allCx);
+
+    function assignColumn(cx, rowMinX, rowMaxX, countInChunk) {
+        if (countInChunk <= 1) {
+            const span = Math.max(globalMaxX - globalMinX, 1);
+            return Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.round(((cx - globalMinX) / span) * (FLOOR_GRID_COLS - 1))));
+        }
+        const span = Math.max(rowMaxX - rowMinX, 1);
+        return Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.round(((cx - rowMinX) / span) * (FLOOR_GRID_COLS - 1))));
+    }
+
+    const layout = [];
+
+    canvasRows.forEach(rowTables => {
+        rowTables.sort((a, b) => a.cx - b.cx);
+        const rowMinX = rowTables[0].cx;
+        const rowMaxX = rowTables[rowTables.length - 1].cx;
+
+        for (let i = 0; i < rowTables.length; i += FLOOR_GRID_COLS) {
+            const chunk = rowTables.slice(i, i + FLOOR_GRID_COLS);
+            const gridRow = makeEmptyFloorRow();
+
+            chunk.forEach(t => {
+                const col = resolveFloorGridColumn(gridRow, assignColumn(t.cx, rowMinX, rowMaxX, chunk.length));
+                if (gridRow[col] === '.') gridRow[col] = t.num;
+            });
+
+            layout.push(gridRow);
+        }
+    });
+
+    return layout.length ? layout : [makeEmptyFloorRow()];
+}
 
 function buildSignInFloorLayout(settings) {
-    const existing = new Set(Object.keys(normalizeTableSettings(settings)));
-    return SIGNIN_FLOOR_LAYOUT.map(row =>
-        row.map(cell => {
-            if (cell === '.') return '.';
-            return existing.has(cell) ? cell : '.';
-        })
-    );
+    return computeFloorLayoutFromTableSettings(settings);
 }
 
 let lastPersistedFloorLayoutJson = null;
@@ -2047,7 +2125,9 @@ function finishTableDrag() {
             const tableNum = draggedTableElement.getAttribute('data-table');
             tableSettings[tableNum].x = bx;
             tableSettings[tableNum].y = by;
-            database.ref(`table_settings/${tableNum}`).update({ x: bx, y: by });
+            database.ref(`table_settings/${tableNum}`).update({ x: bx, y: by })
+                .then(() => forceFloorLayoutSync())
+                .catch(err => console.warn('枱位同步失敗:', err));
         } else {
             cancelTableDrag();
             return;
@@ -2199,7 +2279,7 @@ function createNewTableAction() {
         max_seats: cleanMax,
         x: snapToGrid(center.x - PLATE_SIZE / 2),
         y: snapToGrid(center.y - TABLE_TOTAL_H / 2)
-    });
+    }).then(() => forceFloorLayoutSync());
 }
 
 function fillTableSettingsForm(tableNum, currentMax) {
