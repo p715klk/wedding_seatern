@@ -618,126 +618,64 @@ function zoomCanvas(factor) {
     );
 }
 
-const FLOOR_REF_COLS = 4;
-const CANVAS_COL_UNIT = 220;
-const CANVAS_ROW_UNIT = 230;
-
-function compactAxisMap(values) {
-    const map = new Map();
-    [...new Set(values)].sort((a, b) => a - b).forEach((v, i) => map.set(v, i));
-    return map;
-}
-
-function getGridRowStart(quantizedRow) {
-    return quantizedRow % 2 === 0 ? quantizedRow + 1 : quantizedRow - 1;
-}
-
-function resolvePlacementCollision(placed) {
-    const occupied = new Map();
-    placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
-
-    placed.forEach(t => {
-        let { row, col } = t;
-        while (occupied.has(`${row},${col}`)) {
-            const tryNext = [
-                [row, col + 1], [row + 1, col], [row, col - 1],
-                [row - 1, col], [row + 1, col + 1], [row + 1, col - 1]
-            ];
-            let moved = false;
-            for (const [nr, nc] of tryNext) {
-                if (nc < 0) continue;
-                if (!occupied.has(`${nr},${nc}`)) {
-                    row = nr;
-                    col = nc;
-                    moved = true;
-                    break;
-                }
-            }
-            if (!moved) col++;
-        }
-        t.row = row;
-        t.col = col;
-        occupied.set(`${row},${col}`, t.num);
-    });
-}
-
-function computeFloorLayoutFromTableSettings(settings) {
-    const normalized = normalizeTableSettings(settings);
-    const nums = Object.keys(normalized);
-    if (!nums.length) return { items: [], numHalfRows: 0, numCols: 0 };
-
-    const tables = nums.map(num => ({
-        num: String(num),
-        cx: normalized[num].x + PLATE_CENTER,
-        cy: normalized[num].y + PLATE_CENTER
-    }));
-
-    const minCx = Math.min(...tables.map(t => t.cx));
-    const minCy = Math.min(...tables.map(t => t.cy));
-
-    const placed = tables.map(t => ({
-        num: t.num,
-        col: Math.round((t.cx - minCx) / CANVAS_COL_UNIT),
-        row: Math.round((t.cy - minCy) / CANVAS_ROW_UNIT)
-    }));
-
-    resolvePlacementCollision(placed);
-
-    const colMap = compactAxisMap(placed.map(t => t.col));
-
-    const items = placed.map(t => ({
-        num: t.num,
-        gridCol: colMap.get(t.col) + 1,
-        rowStart: getGridRowStart(t.row),
-        rowSpan: 2
-    }));
-
-    resolveGridSpanOverlap(items);
-
-    const numCols = colMap.size;
-    const numHalfRows = Math.max(...items.map(i => i.rowStart + i.rowSpan - 1));
-
-    return { items, numHalfRows, numCols };
-}
-
-function resolveGridSpanOverlap(items) {
-    const byCol = new Map();
-    items.forEach(item => {
-        if (!byCol.has(item.gridCol)) byCol.set(item.gridCol, []);
-        byCol.get(item.gridCol).push(item);
-    });
-
-    byCol.forEach(colItems => {
-        colItems.sort((a, b) => a.rowStart - b.rowStart || Number(a.num) - Number(b.num));
-        for (let i = 1; i < colItems.length; i++) {
-            const prev = colItems[i - 1];
-            const cur = colItems[i];
-            const minStart = prev.rowStart + prev.rowSpan;
-            if (cur.rowStart < minStart) {
-                cur.rowStart = minStart;
-            }
-        }
-    });
-}
+const FLOOR_PLAN_PADDING = 20;
 
 function buildSignInFloorLayout(settings) {
-    return computeFloorLayoutFromTableSettings(settings);
+    const normalized = normalizeTableSettings(settings);
+    const nums = Object.keys(normalized);
+    if (!nums.length) {
+        return { mode: 'coords', tableSize: TABLE_DIM, items: [], bounds: null };
+    }
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    const items = nums.map(num => {
+        const s = normalized[num];
+        const x = Number(s.x);
+        const y = Number(s.y);
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + TABLE_DIM);
+        maxY = Math.max(maxY, y + TABLE_TOTAL_H);
+        return { num: String(num), x, y };
+    });
+
+    const pad = FLOOR_PLAN_PADDING;
+    return {
+        mode: 'coords',
+        tableSize: TABLE_DIM,
+        items,
+        bounds: {
+            minX: minX - pad,
+            minY: minY - pad,
+            width: maxX - minX + pad * 2,
+            height: maxY - minY + pad * 2
+        }
+    };
 }
 
 let lastPersistedFloorLayoutJson = null;
 
 function normalizeFloorLayout(layout) {
     if (!layout) return null;
-    if (Array.isArray(layout.items)) {
+    if (layout.mode === 'coords' && Array.isArray(layout.items)) {
         return {
+            mode: 'coords',
+            tableSize: Number(layout.tableSize) || TABLE_DIM,
             items: layout.items.map(item => ({
                 num: String(item.num),
-                rowStart: Number(item.rowStart ?? item.gridRow),
-                rowSpan: Number(item.rowSpan) || 2,
-                gridCol: Number(item.gridCol)
+                x: Number(item.x),
+                y: Number(item.y)
             })),
-            numHalfRows: Number(layout.numHalfRows ?? layout.numRows) || 0,
-            numCols: Number(layout.numCols) || 0
+            bounds: layout.bounds ? {
+                minX: Number(layout.bounds.minX),
+                minY: Number(layout.bounds.minY),
+                width: Number(layout.bounds.width),
+                height: Number(layout.bounds.height)
+            } : null
         };
     }
     if (layout.cols != null && Array.isArray(layout.rows)) {

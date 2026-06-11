@@ -5,120 +5,45 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-const TABLE_PLATE_CENTER = 210;
-// seating colGap=440、rowGap=460 → 用一半粒度保留「卡喺兩枱之間」
-const CANVAS_COL_UNIT = 220;
-const CANVAS_ROW_UNIT = 230;
-const FLOOR_REF_COLS = 4;
+// 同 seating 畫布一致 — 直接用 table_settings 嘅 x/y
+const TABLE_DIM = 420;
+const FLOOR_PLAN_PADDING = 20;
 
-function compactAxisMap(values) {
-    const map = new Map();
-    [...new Set(values)].sort((a, b) => a - b).forEach((v, i) => map.set(v, i));
-    return map;
-}
-
-// 用量化 row（唔壓縮）保留側邊枱「卡喺兩行之間」
-function getGridRowStart(quantizedRow) {
-    return quantizedRow % 2 === 0 ? quantizedRow + 1 : quantizedRow - 1;
-}
-
-function resolvePlacementCollision(placed) {
-    const occupied = new Map();
-    placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
-
-    placed.forEach(t => {
-        let { row, col } = t;
-        while (occupied.has(`${row},${col}`)) {
-            const tryNext = [
-                [row, col + 1], [row + 1, col], [row, col - 1],
-                [row - 1, col], [row + 1, col + 1], [row + 1, col - 1]
-            ];
-            let moved = false;
-            for (const [nr, nc] of tryNext) {
-                if (nc < 0) continue;
-                if (!occupied.has(`${nr},${nc}`)) {
-                    row = nr;
-                    col = nc;
-                    moved = true;
-                    break;
-                }
-            }
-            if (!moved) col++;
-        }
-        t.row = row;
-        t.col = col;
-        occupied.set(`${row},${col}`, t.num);
-    });
-}
-
-// 直接跟 seating 畫布 x/y → 稀疏 grid（欄/行數不限，四方可伸展）
-function computeFloorLayoutFromTableSettings(settings) {
+function buildFloorPlanFromTableSettings(settings) {
     const normalized = normalizeTableSettings(settings);
     const nums = Object.keys(normalized);
-    if (!nums.length) return { items: [], numHalfRows: 0, numCols: 0 };
+    if (!nums.length) {
+        return { mode: 'coords', tableSize: TABLE_DIM, items: [], bounds: null };
+    }
 
-    const tables = nums.map(num => ({
-        num: String(num),
-        cx: normalized[num].x + TABLE_PLATE_CENTER,
-        cy: normalized[num].y + TABLE_PLATE_CENTER
-    }));
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
 
-    const minCx = Math.min(...tables.map(t => t.cx));
-    const minCy = Math.min(...tables.map(t => t.cy));
-
-    const placed = tables.map(t => ({
-        num: t.num,
-        col: Math.round((t.cx - minCx) / CANVAS_COL_UNIT),
-        row: Math.round((t.cy - minCy) / CANVAS_ROW_UNIT)
-    }));
-
-    resolvePlacementCollision(placed);
-
-    const colMap = compactAxisMap(placed.map(t => t.col));
-
-    const items = placed.map(t => ({
-        num: t.num,
-        gridCol: colMap.get(t.col) + 1,
-        rowStart: getGridRowStart(t.row),
-        rowSpan: 2
-    }));
-
-    resolveGridSpanOverlap(items);
-
-    const numCols = colMap.size;
-    const numHalfRows = Math.max(...items.map(i => i.rowStart + i.rowSpan - 1));
-
-    return { items, numHalfRows, numCols };
-}
-
-// 同一欄 rowSpan=2 時，相鄰 rowStart 會重叠 — 將下層枱推低
-function resolveGridSpanOverlap(items) {
-    const byCol = new Map();
-    items.forEach(item => {
-        if (!byCol.has(item.gridCol)) byCol.set(item.gridCol, []);
-        byCol.get(item.gridCol).push(item);
+    const items = nums.map(num => {
+        const s = normalized[num];
+        const x = Number(s.x);
+        const y = Number(s.y);
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + TABLE_DIM);
+        maxY = Math.max(maxY, y + TABLE_DIM);
+        return { num: String(num), x, y };
     });
 
-    byCol.forEach(colItems => {
-        colItems.sort((a, b) => a.rowStart - b.rowStart || Number(a.num) - Number(b.num));
-        for (let i = 1; i < colItems.length; i++) {
-            const prev = colItems[i - 1];
-            const cur = colItems[i];
-            const minStart = prev.rowStart + prev.rowSpan;
-            if (cur.rowStart < minStart) {
-                cur.rowStart = minStart;
-            }
+    const pad = FLOOR_PLAN_PADDING;
+    return {
+        mode: 'coords',
+        tableSize: TABLE_DIM,
+        items,
+        bounds: {
+            minX: minX - pad,
+            minY: minY - pad,
+            width: maxX - minX + pad * 2,
+            height: maxY - minY + pad * 2
         }
-    });
-}
-
-function syncFloorCellSize(numCols) {
-    if (!floorPlanWrap) return;
-    floorPlan.style.gridTemplateColumns = `repeat(${Math.max(numCols, 1)}, minmax(0, 1fr))`;
-    floorPlan.style.width = '100%';
-    floorPlan.style.transform = '';
-    floorPlan.dataset.cols = String(numCols || FLOOR_REF_COLS);
-    if (floorPlanHint) floorPlanHint.classList.add('hidden');
+    };
 }
 
 let dbData = {};
@@ -127,6 +52,7 @@ let currentFloorLayoutJson = '';
 const floorPlan = document.getElementById('floor-plan');
 const floorPlanWrap = document.getElementById('floor-plan-wrap');
 const floorPlanHint = document.getElementById('floor-plan-hint');
+const TABLE_RING_BASE = 'floor-table-ring rounded-full border-4 flex items-center justify-center font-black';
 
 function normalizeGuestTags(val) {
     if (!val) return [];
@@ -175,47 +101,51 @@ function normalizeTableSettings(raw) {
 
 function createTableCard(num) {
     const div = document.createElement('div');
-    div.className = 'floor-cell-table bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center cursor-pointer hover:border-red-400 transition active:scale-95';
+    div.className = 'floor-cell-table bg-white p-1 sm:p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center cursor-pointer hover:border-red-400 transition active:scale-95';
     div.id = `table-card-${num}`;
     div.setAttribute('onclick', `openModal('${num}')`);
     div.innerHTML = `
-        <span class="text-sm font-bold text-gray-500">第 ${num} 桌</span>
-        <div class="w-12 h-12 rounded-full border-4 border-gray-300 flex items-center justify-center text-xs font-black text-gray-400" id="table-circle-${num}">0%</div>
+        <span class="floor-table-label font-bold text-gray-500">第 ${num} 桌</span>
+        <div class="${TABLE_RING_BASE} border-gray-300 text-gray-400" id="table-circle-${num}">0%</div>
     `;
     return div;
 }
 
 function renderFloorPlan(layout) {
-    const { items = [], numHalfRows = 0, numCols = 0 } = layout || {};
+    const { items = [], bounds, tableSize = TABLE_DIM } = layout || {};
 
-    syncFloorCellSize(numCols);
     floorPlan.innerHTML = '';
+    if (!items.length || !bounds) {
+        floorPlan.style.aspectRatio = '';
+        if (floorPlanHint) floorPlanHint.classList.add('hidden');
+        return;
+    }
 
-    if (!items.length) return;
+    floorPlan.style.aspectRatio = `${bounds.width} / ${bounds.height}`;
 
-    floorPlan.style.gridTemplateRows = `repeat(${numHalfRows}, 3rem)`;
-
-    items.forEach(({ num, rowStart, rowSpan, gridCol }) => {
+    items.forEach(({ num, x, y }) => {
         const div = createTableCard(num);
-        div.style.gridRow = `${rowStart} / span ${rowSpan}`;
-        div.style.gridColumn = String(gridCol);
+        div.style.left = `${((x - bounds.minX) / bounds.width) * 100}%`;
+        div.style.top = `${((y - bounds.minY) / bounds.height) * 100}%`;
+        div.style.width = `${(tableSize / bounds.width) * 100}%`;
+        div.style.height = `${(tableSize / bounds.height) * 100}%`;
         floorPlan.appendChild(div);
     });
+
+    if (floorPlanHint) {
+        floorPlanHint.classList.toggle('hidden', bounds.height / bounds.width <= 1.5);
+    }
 }
 
-window.addEventListener('resize', () => {
-    syncFloorCellSize(Number(floorPlan.dataset.cols || FLOOR_REF_COLS));
-});
+renderFloorPlan({ items: [], bounds: null });
 
-renderFloorPlan({ items: [], numHalfRows: 0, numCols: 0 });
-
-// Firebase 即時監聽 — 排位跟 table_settings 動態更新
+// Firebase 即時監聽 — 排位跟 table_settings x/y 動態更新
 database.ref().on('value', (snapshot) => {
     const root = snapshot.val() || {};
     dbData = root.wedding_guests || {};
     statusState = root.guest_status || {};
 
-    const layout = computeFloorLayoutFromTableSettings(root.table_settings);
+    const layout = buildFloorPlanFromTableSettings(root.table_settings);
     const layoutJson = JSON.stringify(layout);
     if (layoutJson !== currentFloorLayoutJson) {
         currentFloorLayoutJson = layoutJson;
@@ -252,13 +182,13 @@ function updateFloorPlanSummary() {
         if (circle && card) {
             circle.innerText = `${percent}%`;
             if (percent === 100 && activeCount > 0) {
-                circle.className = "w-12 h-12 rounded-full border-4 border-green-500 bg-green-50 flex items-center justify-center text-xs font-black text-green-600";
+                circle.className = `${TABLE_RING_BASE} border-green-500 bg-green-50 text-green-600`;
                 card.className = card.className.replace(/border-gray-200|border-orange-300/, 'border-green-500');
             } else if (percent > 0) {
-                circle.className = "w-12 h-12 rounded-full border-4 border-orange-400 bg-orange-50 flex items-center justify-center text-xs font-black text-orange-500";
+                circle.className = `${TABLE_RING_BASE} border-orange-400 bg-orange-50 text-orange-500`;
                 card.className = card.className.replace(/border-gray-200|border-green-500/, 'border-orange-300');
             } else {
-                circle.className = "w-12 h-12 rounded-full border-4 border-gray-300 bg-white flex items-center justify-center text-xs font-black text-gray-400";
+                circle.className = `${TABLE_RING_BASE} border-gray-300 bg-white text-gray-400`;
                 card.className = card.className.replace(/border-green-500|border-orange-300/, 'border-gray-200');
             }
         }
