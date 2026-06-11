@@ -628,6 +628,10 @@ function compactAxisMap(values) {
     return map;
 }
 
+function getTableRowSpan(quantizedRow) {
+    return quantizedRow % 2 === 0 ? 1 : 2;
+}
+
 function resolvePlacementCollision(placed) {
     const occupied = new Map();
     placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
@@ -685,8 +689,8 @@ function computeFloorLayoutFromTableSettings(settings) {
     const items = placed.map(t => ({
         num: t.num,
         gridCol: colMap.get(t.col) + 1,
-        rowStart: rowMap.get(t.row) * 2 + 1,
-        rowSpan: 2
+        rowStart: rowMap.get(t.row) + 1,
+        rowSpan: getTableRowSpan(t.row)
     }));
 
     resolveGridSpanOverlap(items);
