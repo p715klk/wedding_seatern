@@ -618,18 +618,44 @@ function computeFloorLayoutFromTableSettings(settings) {
 
 let lastPersistedFloorLayoutJson = null;
 
+function normalizeFloorLayout(layout) {
+    if (!layout) return null;
+    const rows = Array.isArray(layout) ? layout : Object.keys(layout)
+        .sort((a, b) => Number(a) - Number(b))
+        .map(k => layout[k]);
+    return rows.map(row => {
+        if (Array.isArray(row)) return row.map(cell => String(cell));
+        if (row && typeof row === 'object') {
+            return Object.keys(row)
+                .sort((a, b) => Number(a) - Number(b))
+                .map(k => String(row[k]));
+        }
+        return [String(row)];
+    });
+}
+
 function syncFloorLayoutIfNeeded(existingLayout) {
     const computed = computeFloorLayoutFromTableSettings(tableSettings);
     if (!computed) return Promise.resolve();
+
+    const normalizedExisting = normalizeFloorLayout(existingLayout);
     const computedJson = JSON.stringify(computed);
-    const existingJson = JSON.stringify(existingLayout);
+    const existingJson = JSON.stringify(normalizedExisting);
     if (computedJson === existingJson) {
         lastPersistedFloorLayoutJson = computedJson;
         return Promise.resolve();
     }
     if (computedJson === lastPersistedFloorLayoutJson) return Promise.resolve();
-    lastPersistedFloorLayoutJson = computedJson;
-    return database.ref('floor_layout').set(computed);
+
+    return database.ref('floor_layout').set(computed).then(() => {
+        lastPersistedFloorLayoutJson = computedJson;
+    }).catch(err => {
+        console.warn('floor_layout 同步失敗（簽到頁排位可能未更新）:', err);
+    });
+}
+
+function scheduleFloorLayoutSync(existingLayout) {
+    syncFloorLayoutIfNeeded(existingLayout);
 }
 
 function getTablesBoundingBox() {
@@ -1685,19 +1711,27 @@ database.ref().on('value', (snapshot) => {
         }
     }
     if (updatedSettings) {
-        database.ref('table_settings').update(tableSettings);
-        return; 
-    }
-
-    if (!localStorage.getItem('seating_grid_snap_v1')) {
-        snapAllTablesToGrid().then(() => {
-            localStorage.setItem('seating_grid_snap_v1', '1');
-            syncFloorLayoutIfNeeded(root.floor_layout).then(() => bootstrapSeatingView());
+        database.ref('table_settings').update(tableSettings).catch(err => {
+            console.warn('table_settings 初始化失敗:', err);
         });
+        bootstrapSeatingView();
+        scheduleFloorLayoutSync(root.floor_layout);
         return;
     }
 
-    syncFloorLayoutIfNeeded(root.floor_layout).then(() => bootstrapSeatingView());
+    if (!localStorage.getItem('seating_grid_snap_v1')) {
+        snapAllTablesToGrid()
+            .catch(err => console.warn('枱位對齊格線失敗:', err))
+            .finally(() => {
+                localStorage.setItem('seating_grid_snap_v1', '1');
+                bootstrapSeatingView();
+                scheduleFloorLayoutSync(root.floor_layout);
+            });
+        return;
+    }
+
+    bootstrapSeatingView();
+    scheduleFloorLayoutSync(root.floor_layout);
 });
 
 window.addEventListener('resize', () => {
@@ -1706,14 +1740,26 @@ window.addEventListener('resize', () => {
     window._seatingResizeTimer = setTimeout(() => fitViewToTables(), 200);
 });
 
+function forEachGuestTable(callback) {
+    if (Array.isArray(allGuests)) {
+        allGuests.forEach(callback);
+        return;
+    }
+    if (allGuests && typeof allGuests === 'object') {
+        Object.values(allGuests).forEach(callback);
+    }
+}
+
 function updateGlobalStats() {
     let total = 0, assigned = 0;
-    allGuests.forEach(table => {
+    forEachGuestTable(table => {
         if (Array.isArray(table)) {
             table.forEach(g => { if (g && g.name) { total++; assigned++; } });
         }
     });
-    unassignedPool.forEach(g => { if (g && g.name) { total++; } });
+    if (Array.isArray(unassignedPool)) {
+        unassignedPool.forEach(g => { if (g && g.name) { total++; } });
+    }
     document.getElementById('global-stats').innerText = `已排位: ${assigned} / 總人數: ${total}`;
 }
 
