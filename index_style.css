@@ -9,22 +9,22 @@ html, body {
     touch-action: manipulation;
 }
 
-/* 簽到頁平面圖 — 4 欄 + 半格行（側邊枱卡喺兩行之間） */
+/* 簽到頁平面圖 — 欄/行數由 seating 座標動態決定，可四方捲動 */
 .floor-plan-wrap {
     overflow: auto;
     -webkit-overflow-scrolling: touch;
     width: 100%;
+    max-height: 75vh;
 }
 
 #floor-plan {
     --floor-gap: 0.75rem;
+    --floor-cell: 7.75rem;
     display: grid !important;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
     row-gap: 0;
     column-gap: var(--floor-gap);
     text-align: center;
     margin: 0 auto;
-    width: 100%;
     justify-items: stretch;
     align-items: stretch;
 }

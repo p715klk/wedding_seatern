@@ -6,9 +6,97 @@ firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
 const TABLE_PLATE_CENTER = 210;
-const FLOOR_COLS = 4;
-const SEATING_ROW_Y_THRESHOLD = 240;
-const SEATING_COL_GAP = 440;
+// seating colGap=440、rowGap=460 → 用一半粒度保留「卡喺兩枱之間」
+const CANVAS_COL_UNIT = 220;
+const CANVAS_ROW_UNIT = 230;
+const FLOOR_REF_COLS = 4;
+
+function resolvePlacementCollision(placed) {
+    const occupied = new Map();
+    placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
+
+    placed.forEach(t => {
+        let { row, col } = t;
+        while (occupied.has(`${row},${col}`)) {
+            const tryNext = [
+                [row, col + 1], [row + 1, col], [row, col - 1],
+                [row - 1, col], [row + 1, col + 1], [row + 1, col - 1]
+            ];
+            let moved = false;
+            for (const [nr, nc] of tryNext) {
+                if (nc < 0) continue;
+                if (!occupied.has(`${nr},${nc}`)) {
+                    row = nr;
+                    col = nc;
+                    moved = true;
+                    break;
+                }
+            }
+            if (!moved) col++;
+        }
+        t.row = row;
+        t.col = col;
+        occupied.set(`${row},${col}`, t.num);
+    });
+}
+
+// 直接跟 seating 畫布 x/y → 稀疏 grid（欄/行數不限，四方可伸展）
+function computeFloorLayoutFromTableSettings(settings) {
+    const normalized = normalizeTableSettings(settings);
+    const nums = Object.keys(normalized);
+    if (!nums.length) return { items: [], numHalfRows: 0, numCols: 0 };
+
+    const tables = nums.map(num => ({
+        num: String(num),
+        cx: normalized[num].x + TABLE_PLATE_CENTER,
+        cy: normalized[num].y + TABLE_PLATE_CENTER
+    }));
+
+    const minCx = Math.min(...tables.map(t => t.cx));
+    const minCy = Math.min(...tables.map(t => t.cy));
+
+    const placed = tables.map(t => ({
+        num: t.num,
+        col: Math.round((t.cx - minCx) / CANVAS_COL_UNIT),
+        row: Math.round((t.cy - minCy) / CANVAS_ROW_UNIT)
+    }));
+
+    resolvePlacementCollision(placed);
+
+    // 保留空白欄/行 → 位置同 seating 畫布一致（15 在最右就喺最右）
+    const numCols = Math.max(...placed.map(t => t.col)) + 1;
+    const numHalfRows = Math.max(...placed.map(t => t.row)) + 2;
+
+    const items = placed.map(t => ({
+        num: t.num,
+        gridCol: t.col + 1,
+        rowStart: t.row + 1,
+        rowSpan: 2
+    }));
+
+    return { items, numHalfRows, numCols };
+}
+
+function syncFloorCellSize(numCols) {
+    if (!floorPlanWrap) return;
+    const gapPx = 12;
+    const wrapW = floorPlanWrap.clientWidth || 544;
+    const refCols = Math.min(Math.max(numCols, 1), FLOOR_REF_COLS);
+    const cellW = Math.floor((wrapW - gapPx * (refCols - 1)) / refCols);
+    floorPlan.style.setProperty('--floor-cell', `${Math.max(cellW, 72)}px`);
+
+    if (numCols <= FLOOR_REF_COLS) {
+        floorPlan.style.gridTemplateColumns = `repeat(${Math.max(numCols, 1)}, minmax(0, 1fr))`;
+        floorPlan.style.width = '100%';
+        if (floorPlanHint) floorPlanHint.classList.add('hidden');
+    } else {
+        floorPlan.style.gridTemplateColumns = `repeat(${numCols}, var(--floor-cell))`;
+        floorPlan.style.width = 'max-content';
+        if (floorPlanHint) floorPlanHint.classList.remove('hidden');
+    }
+
+    floorPlan.dataset.cols = String(numCols);
+}
 
 let dbData = {};
 let statusState = {};
@@ -62,143 +150,6 @@ function normalizeTableSettings(raw) {
     return normalized;
 }
 
-function groupTablesByY(tables, threshold = SEATING_ROW_Y_THRESHOLD) {
-    const sorted = [...tables].sort((a, b) => a.cy - b.cy || a.cx - b.cx);
-    const groups = [];
-    let bucket = [];
-    let centerY = null;
-
-    sorted.forEach(t => {
-        if (centerY === null || Math.abs(t.cy - centerY) > threshold) {
-            if (bucket.length) groups.push(bucket);
-            bucket = [t];
-            centerY = t.cy;
-        } else {
-            bucket.push(t);
-            centerY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
-        }
-    });
-    if (bucket.length) groups.push(bucket);
-    return groups;
-}
-
-function classifyWingCol(cx, allCx) {
-    const minX = Math.min(...allCx);
-    const maxX = Math.max(...allCx);
-    const midX = (minX + maxX) / 2;
-    return cx < midX ? 1 : 4;
-}
-
-function isWingTable(cx, allCx) {
-    const minX = Math.min(...allCx);
-    const maxX = Math.max(...allCx);
-    const span = Math.max(maxX - minX, SEATING_COL_GAP);
-    const rel = (cx - minX) / span;
-    return rel < 0.24 || rel > 0.76;
-}
-
-function bandCenterY(band) {
-    return band.reduce((sum, t) => sum + t.cy, 0) / band.length;
-}
-
-// 全部枱統一：中間 cols 2–3 成行，左右 cols 1/4 卡拉喺行與行之間（枱數不限）
-function computeFloorLayoutFromTableSettings(settings) {
-    const normalized = normalizeTableSettings(settings);
-    const nums = Object.keys(normalized);
-    if (!nums.length) return { items: [], numHalfRows: 0, numCols: FLOOR_COLS };
-
-    const tables = nums.map(num => ({
-        num: String(num),
-        cx: normalized[num].x + TABLE_PLATE_CENTER,
-        cy: normalized[num].y + TABLE_PLATE_CENTER
-    }));
-    const allCx = tables.map(t => t.cx);
-
-    const center = [];
-    const wings = [];
-
-    tables.forEach(t => {
-        if (isWingTable(t.cx, allCx)) {
-            wings.push({ ...t, gridCol: classifyWingCol(t.cx, allCx) });
-        } else {
-            center.push(t);
-        }
-    });
-
-    const centerBands = groupTablesByY(center);
-    const items = [];
-    const occupied = new Set();
-
-    function tryPlace(rowStart, gridCol, num) {
-        const key = `${rowStart},${gridCol}`;
-        if (occupied.has(key)) return false;
-        occupied.add(key);
-        items.push({ num, rowStart, rowSpan: 2, gridCol });
-        return true;
-    }
-
-    centerBands.forEach((band, i) => {
-        const rowStart = 1 + i * 2;
-        band.sort((a, b) => a.cx - b.cx);
-        band.forEach((t, idx) => {
-            const gridCol = band.length === 1
-                ? (t.cx < (Math.min(...allCx) + Math.max(...allCx)) / 2 ? 2 : 3)
-                : (idx === 0 ? 2 : 3);
-            if (!tryPlace(rowStart, gridCol, t.num)) {
-                tryPlace(rowStart, gridCol === 2 ? 3 : 2, t.num)
-                    || tryPlace(rowStart + 2, gridCol, t.num);
-            }
-        });
-    });
-
-    const staggerSlots = [];
-    for (let i = 0; i < centerBands.length - 1; i++) {
-        const rsA = 1 + i * 2;
-        const rsB = 1 + (i + 1) * 2;
-        staggerSlots.push({
-            rowStart: Math.floor((rsA + rsB) / 2),
-            cy: (bandCenterY(centerBands[i]) + bandCenterY(centerBands[i + 1])) / 2
-        });
-    }
-    if (centerBands.length) {
-        const lastRowStart = 1 + (centerBands.length - 1) * 2;
-        staggerSlots.push({
-            rowStart: lastRowStart + 1,
-            cy: bandCenterY(centerBands[centerBands.length - 1]) + SEATING_ROW_Y_THRESHOLD
-        });
-    }
-    if (!staggerSlots.length) {
-        staggerSlots.push({ rowStart: 4, cy: tables[0]?.cy || 0 });
-    }
-
-    function assignWingsSide(wingTables) {
-        wingTables.sort((a, b) => a.cy - b.cy || Number(a.num) - Number(b.num));
-        wingTables.forEach(t => {
-            const ranked = [...staggerSlots].sort(
-                (a, b) => Math.abs(t.cy - a.cy) - Math.abs(t.cy - b.cy)
-            );
-            for (const slot of ranked) {
-                if (tryPlace(slot.rowStart, t.gridCol, t.num)) return;
-            }
-            let row = (staggerSlots[staggerSlots.length - 1]?.rowStart || 4) + 2;
-            while (!tryPlace(row, t.gridCol, t.num)) row += 2;
-        });
-    }
-
-    assignWingsSide(wings.filter(t => t.gridCol === 1));
-    assignWingsSide(wings.filter(t => t.gridCol === 4));
-
-    const numHalfRows = items.length
-        ? Math.max(...items.map(i => i.rowStart + i.rowSpan - 1))
-        : 0;
-
-    return { items, numHalfRows, numCols: FLOOR_COLS };
-}
-
-function syncFloorCellSize() {
-    if (floorPlanHint) floorPlanHint.classList.add('hidden');
-}
-
 function createTableCard(num) {
     const div = document.createElement('div');
     div.className = 'floor-cell-table bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center cursor-pointer hover:border-red-400 transition active:scale-95';
@@ -212,9 +163,9 @@ function createTableCard(num) {
 }
 
 function renderFloorPlan(layout) {
-    const { items = [], numHalfRows = 0 } = layout || {};
+    const { items = [], numHalfRows = 0, numCols = 0 } = layout || {};
 
-    syncFloorCellSize();
+    syncFloorCellSize(numCols);
     floorPlan.innerHTML = '';
 
     if (!items.length) return;
@@ -229,7 +180,9 @@ function renderFloorPlan(layout) {
     });
 }
 
-window.addEventListener('resize', syncFloorCellSize);
+window.addEventListener('resize', () => {
+    syncFloorCellSize(Number(floorPlan.dataset.cols || FLOOR_REF_COLS));
+});
 
 renderFloorPlan({ items: [], numHalfRows: 0, numCols: 0 });
 
