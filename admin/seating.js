@@ -685,14 +685,36 @@ function computeFloorLayoutFromTableSettings(settings) {
     const items = placed.map(t => ({
         num: t.num,
         gridCol: colMap.get(t.col) + 1,
-        rowStart: rowMap.get(t.row) + 1,
+        rowStart: rowMap.get(t.row) * 2 + 1,
         rowSpan: 2
     }));
+
+    resolveGridSpanOverlap(items);
 
     const numCols = colMap.size;
     const numHalfRows = Math.max(...items.map(i => i.rowStart + i.rowSpan - 1));
 
     return { items, numHalfRows, numCols };
+}
+
+function resolveGridSpanOverlap(items) {
+    const byCol = new Map();
+    items.forEach(item => {
+        if (!byCol.has(item.gridCol)) byCol.set(item.gridCol, []);
+        byCol.get(item.gridCol).push(item);
+    });
+
+    byCol.forEach(colItems => {
+        colItems.sort((a, b) => a.rowStart - b.rowStart || Number(a.num) - Number(b.num));
+        for (let i = 1; i < colItems.length; i++) {
+            const prev = colItems[i - 1];
+            const cur = colItems[i];
+            const minStart = prev.rowStart + prev.rowSpan;
+            if (cur.rowStart < minStart) {
+                cur.rowStart = minStart;
+            }
+        }
+    });
 }
 
 function buildSignInFloorLayout(settings) {
