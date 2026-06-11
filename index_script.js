@@ -17,11 +17,6 @@ function compactAxisMap(values) {
     return map;
 }
 
-// 整行枱（偶數 row）用 span 1；側邊卡位枱（奇數 row）用 span 2
-function getTableRowSpan(quantizedRow) {
-    return quantizedRow % 2 === 0 ? 1 : 2;
-}
-
 function resolvePlacementCollision(placed) {
     const occupied = new Map();
     placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
@@ -81,7 +76,7 @@ function computeFloorLayoutFromTableSettings(settings) {
         num: t.num,
         gridCol: colMap.get(t.col) + 1,
         rowStart: rowMap.get(t.row) + 1,
-        rowSpan: getTableRowSpan(t.row)
+        rowSpan: 2
     }));
 
     resolveGridSpanOverlap(items);
