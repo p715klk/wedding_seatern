@@ -5,13 +5,12 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-const FLOOR_GRID_COLS = 4;
-const TABLE_PLATE_CENTER = 210;
-const EMPTY_FLOOR_LAYOUT = [['.', '.', '.', '.']];
+const TABLE_CANVAS_SIZE = 420;
+const FLOOR_CANVAS_PAD = 28;
 
 let dbData = {};
 let statusState = {};
-let currentFloorLayoutJson = '';
+let currentTableSettingsKey = '';
 const floorPlan = document.getElementById('floor-plan');
 
 function normalizeGuestTags(val) {
@@ -59,120 +58,77 @@ function normalizeTableSettings(raw) {
     return normalized;
 }
 
-function makeEmptyFloorRow() {
-    return ['.', '.', '.', '.'];
-}
-
-function resolveFloorGridColumn(row, preferredCol) {
-    if (row[preferredCol] === '.') return preferredCol;
-    for (let d = 1; d < FLOOR_GRID_COLS; d++) {
-        if (preferredCol - d >= 0 && row[preferredCol - d] === '.') return preferredCol - d;
-        if (preferredCol + d < FLOOR_GRID_COLS && row[preferredCol + d] === '.') return preferredCol + d;
-    }
-    for (let c = 0; c < FLOOR_GRID_COLS; c++) {
-        if (row[c] === '.') return c;
-    }
-    return preferredCol;
-}
-
-// 與 seating.js 相同：依 table_settings 座標動態生成，枱數不限
-function computeFloorLayoutFromTableSettings(settings) {
-    const normalized = normalizeTableSettings(settings);
+function getTablesBoundingBox(normalized) {
     const nums = Object.keys(normalized);
-    if (!nums.length) return [makeEmptyFloorRow()];
+    if (!nums.length) return null;
 
-    const tables = nums.map(num => ({
-        num: String(num),
-        cx: normalized[num].x + TABLE_PLATE_CENTER,
-        cy: normalized[num].y + TABLE_PLATE_CENTER
-    }));
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
 
-    tables.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
-
-    const yBuckets = [...new Set(tables.map(t => Math.round(t.cy / 50) * 50))].sort((a, b) => a - b);
-    let rowThreshold = 280;
-    if (yBuckets.length > 1) {
-        const gaps = [];
-        for (let i = 1; i < yBuckets.length; i++) gaps.push(yBuckets[i] - yBuckets[i - 1]);
-        gaps.sort((a, b) => a - b);
-        rowThreshold = Math.max(180, Math.min(400, gaps[Math.floor(gaps.length / 2)] * 0.55));
-    }
-
-    const canvasRows = [];
-    let bucket = [];
-    let rowCenterY = null;
-
-    tables.forEach(t => {
-        if (rowCenterY === null || Math.abs(t.cy - rowCenterY) > rowThreshold) {
-            if (bucket.length) canvasRows.push(bucket);
-            bucket = [t];
-            rowCenterY = t.cy;
-        } else {
-            bucket.push(t);
-            rowCenterY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
-        }
-    });
-    if (bucket.length) canvasRows.push(bucket);
-
-    const allCx = tables.map(t => t.cx);
-    const globalMinX = Math.min(...allCx);
-    const globalMaxX = Math.max(...allCx);
-
-    function assignColumn(cx, rowMinX, rowMaxX, countInChunk) {
-        if (countInChunk <= 1) {
-            const span = Math.max(globalMaxX - globalMinX, 1);
-            return Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.round(((cx - globalMinX) / span) * (FLOOR_GRID_COLS - 1))));
-        }
-        const span = Math.max(rowMaxX - rowMinX, 1);
-        return Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.round(((cx - rowMinX) / span) * (FLOOR_GRID_COLS - 1))));
-    }
-
-    const layout = [];
-
-    canvasRows.forEach(rowTables => {
-        rowTables.sort((a, b) => a.cx - b.cx);
-        const rowMinX = rowTables[0].cx;
-        const rowMaxX = rowTables[rowTables.length - 1].cx;
-
-        for (let i = 0; i < rowTables.length; i += FLOOR_GRID_COLS) {
-            const chunk = rowTables.slice(i, i + FLOOR_GRID_COLS);
-            const gridRow = makeEmptyFloorRow();
-
-            chunk.forEach(t => {
-                const col = resolveFloorGridColumn(gridRow, assignColumn(t.cx, rowMinX, rowMaxX, chunk.length));
-                if (gridRow[col] === '.') gridRow[col] = t.num;
-            });
-
-            layout.push(gridRow);
-        }
+    nums.forEach(num => {
+        const s = normalized[num];
+        minX = Math.min(minX, s.x);
+        minY = Math.min(minY, s.y);
+        maxX = Math.max(maxX, s.x + TABLE_CANVAS_SIZE);
+        maxY = Math.max(maxY, s.y + TABLE_CANVAS_SIZE);
     });
 
-    return layout.length ? layout : [makeEmptyFloorRow()];
+    return {
+        minX,
+        minY,
+        width: maxX - minX,
+        height: maxY - minY
+    };
 }
 
-function renderFloorPlan(layout) {
-    const grid = Array.isArray(layout) && layout.length ? layout : EMPTY_FLOOR_LAYOUT;
+function renderFloorPlanFromSettings(tableSettingsRaw) {
+    const normalized = normalizeTableSettings(tableSettingsRaw);
+    const tableNums = Object.keys(normalized).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+
     floorPlan.innerHTML = '';
-    grid.forEach(row => {
-        row.forEach(cell => {
-            const div = document.createElement('div');
-            if (cell === '.') {
-                div.className = "h-20";
-            } else {
-                div.className = "bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center h-24 cursor-pointer hover:border-red-400 transition active:scale-95";
-                div.id = `table-card-${cell}`;
-                div.setAttribute('onclick', `openModal('${cell}')`);
-                div.innerHTML = `
-                    <span class="text-sm font-bold text-gray-500">第 ${cell} 桌</span>
-                    <div class="w-12 h-12 rounded-full border-4 border-gray-300 flex items-center justify-center text-xs font-black text-gray-400" id="table-circle-${cell}">0%</div>
-                `;
-            }
-            floorPlan.appendChild(div);
-        });
+    floorPlan.style.aspectRatio = '';
+    floorPlan.style.height = '';
+
+    if (!tableNums.length) {
+        floorPlan.style.minHeight = '120px';
+        return;
+    }
+
+    const bounds = getTablesBoundingBox(normalized);
+    const pad = FLOOR_CANVAS_PAD;
+    const totalW = bounds.width + pad * 2;
+    const totalH = bounds.height + pad * 2;
+
+    floorPlan.style.aspectRatio = `${totalW} / ${totalH}`;
+
+    const cardSizePct = (TABLE_CANVAS_SIZE / totalW) * 100;
+
+    tableNums.forEach(num => {
+        const s = normalized[num];
+        const cx = s.x + TABLE_CANVAS_SIZE / 2;
+        const cy = s.y + TABLE_CANVAS_SIZE / 2;
+        const leftPct = ((cx - bounds.minX + pad) / totalW) * 100;
+        const topPct = ((cy - bounds.minY + pad) / totalH) * 100;
+
+        const card = document.createElement('div');
+        card.className = 'floor-table-card';
+        card.id = `table-card-${num}`;
+        card.style.left = `${leftPct}%`;
+        card.style.top = `${topPct}%`;
+        card.style.width = `${cardSizePct}%`;
+        card.style.aspectRatio = '1';
+        card.setAttribute('onclick', `openModal('${num}')`);
+        card.innerHTML = `
+            <span class="floor-table-label">第 ${num} 桌</span>
+            <div class="floor-table-circle" id="table-circle-${num}">0%</div>
+        `;
+        floorPlan.appendChild(card);
     });
 }
 
-renderFloorPlan(EMPTY_FLOOR_LAYOUT);
+renderFloorPlanFromSettings({});
 
 // Firebase 即時監聽 — 排位跟 table_settings 動態更新
 database.ref().on('value', (snapshot) => {
@@ -180,11 +136,10 @@ database.ref().on('value', (snapshot) => {
     dbData = root.wedding_guests || {};
     statusState = root.guest_status || {};
 
-    const layout = computeFloorLayoutFromTableSettings(root.table_settings);
-    const layoutJson = JSON.stringify(layout);
-    if (layoutJson !== currentFloorLayoutJson) {
-        currentFloorLayoutJson = layoutJson;
-        renderFloorPlan(layout);
+    const settingsKey = JSON.stringify(normalizeTableSettings(root.table_settings));
+    if (settingsKey !== currentTableSettingsKey) {
+        currentTableSettingsKey = settingsKey;
+        renderFloorPlanFromSettings(root.table_settings);
     }
 
     updateFloorPlanSummary();
@@ -217,14 +172,14 @@ function updateFloorPlanSummary() {
         if (circle && card) {
             circle.innerText = `${percent}%`;
             if (percent === 100 && activeCount > 0) {
-                circle.className = "w-12 h-12 rounded-full border-4 border-green-500 bg-green-50 flex items-center justify-center text-xs font-black text-green-600";
-                card.className = card.className.replace(/border-gray-200|border-orange-300/, 'border-green-500');
+                circle.className = "floor-table-circle border-green-500 bg-green-50 text-green-600";
+                card.style.borderColor = '#22c55e';
             } else if (percent > 0) {
-                circle.className = "w-12 h-12 rounded-full border-4 border-orange-400 bg-orange-50 flex items-center justify-center text-xs font-black text-orange-500";
-                card.className = card.className.replace(/border-gray-200|border-green-500/, 'border-orange-300');
+                circle.className = "floor-table-circle border-orange-400 bg-orange-50 text-orange-500";
+                card.style.borderColor = '#fb923c';
             } else {
-                circle.className = "w-12 h-12 rounded-full border-4 border-gray-300 bg-white flex items-center justify-center text-xs font-black text-gray-400";
-                card.className = card.className.replace(/border-green-500|border-orange-300/, 'border-gray-200');
+                circle.className = "floor-table-circle border-gray-300 bg-white text-gray-400";
+                card.style.borderColor = '#e5e7eb';
             }
         }
     });
