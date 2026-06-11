@@ -59,6 +59,7 @@ function buildTagAddSelectHTML(columnKey, selectedTags, side = '男方') {
     let optsHTML = `<option value="">＋</option>`;
     optsHTML += available.map(cat => `<option value="${cat}">${cat}</option>`).join('');
     optsHTML += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>`;
+    optsHTML += `<option value="__DELETE__" class="text-red-600 font-bold">− 刪除標籤...</option>`;
     return `<select onchange="handleTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border ${c.select} rounded px-1 py-0.5 font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
 }
 
@@ -179,9 +180,84 @@ function handleTagAdd(selectEl, columnKey) {
         selectEl.value = '';
         return;
     }
+    if (val === '__DELETE__') {
+        openDeleteTagDialog(columnKey, selectEl);
+        selectEl.value = '';
+        return;
+    }
     const row = selectEl.closest('tr');
     insertTagChipBeforeSelect(row, columnKey, val);
     refreshTagAddSelect(row, columnKey);
+}
+
+function collectGuestsFromDOM() {
+    const guests = [];
+    if (!tbody) return guests;
+    tbody.querySelectorAll('tr').forEach(row => {
+        const g = collectGuestFromRow(row);
+        if (g) guests.push(g);
+    });
+    return guests;
+}
+
+function getGuestsUsingTagInAdmin(tag) {
+    return findGuestsUsingTag(tag, collectGuestsFromDOM());
+}
+
+function populateDeleteTagSelect(columnKey) {
+    const select = document.getElementById('delete-tag-select');
+    const pool = (categoriesByColumn[columnKey] || []).filter(t => t && t !== '未分類');
+    select.innerHTML = pool.length
+        ? pool.map(t => `<option value="${t.replace(/"/g, '&quot;')}">${t}</option>`).join('')
+        : '<option value="">（無可刪除標籤）</option>';
+}
+
+function updateDeleteTagUsageHint() {
+    const select = document.getElementById('delete-tag-select');
+    const hint = document.getElementById('delete-tag-usage-hint');
+    const btn = document.getElementById('btn-confirm-delete-tag');
+    const tag = select.value;
+    if (!tag) {
+        hint.textContent = '目前標籤清單為空。';
+        btn.disabled = true;
+        return;
+    }
+    const users = getGuestsUsingTagInAdmin(tag);
+    if (users.length > 0) {
+        const names = users.map(g => g.name).join('、');
+        hint.innerHTML = `<span class="text-red-600 font-bold">尚有 ${users.length} 位賓客使用中：</span>${names}`;
+        btn.disabled = true;
+    } else {
+        hint.innerHTML = '<span class="text-green-700 font-bold">無人使用此標籤，可安全刪除。</span>';
+        btn.disabled = false;
+    }
+}
+
+function openDeleteTagDialog(columnKey, selectEl) {
+    activeSelectElement = selectEl;
+    activeColumnKey = columnKey;
+    populateDeleteTagSelect(columnKey);
+    updateDeleteTagUsageHint();
+    document.getElementById('delete-tag-dialog-overlay').classList.remove('hidden');
+}
+
+function closeDeleteTagDialog(isConfirm) {
+    document.getElementById('delete-tag-dialog-overlay').classList.add('hidden');
+    if (isConfirm && activeColumnKey) {
+        const tag = document.getElementById('delete-tag-select').value;
+        if (tag && getGuestsUsingTagInAdmin(tag).length === 0) {
+            const pool = categoriesByColumn[activeColumnKey];
+            const idx = pool.indexOf(tag);
+            if (idx !== -1) {
+                pool.splice(idx, 1);
+                refreshAllTagAddSelects(activeColumnKey);
+                alert(`✅ 已從標籤清單移除「${tag}」\n請記得按「儲存變更」同步至 Firebase。`);
+            }
+        }
+    }
+    if (activeSelectElement) activeSelectElement.value = '';
+    activeSelectElement = null;
+    activeColumnKey = null;
 }
 
 function removeTagFromRow(btn, columnKey) {

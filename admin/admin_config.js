@@ -88,6 +88,10 @@ function normalizeTags(val) {
     return [s];
 }
 
+function findGuestsUsingTag(tag, guests) {
+    return guests.filter(g => normalizeTags(g.group).includes(tag));
+}
+
 function mergeGuestLabelsToTags(guest, keys) {
     const tags = new Set();
     keys.forEach(k => normalizeTags(guest[k]).forEach(t => tags.add(t)));

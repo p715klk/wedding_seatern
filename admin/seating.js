@@ -14,6 +14,7 @@ const PRIMARY_TAG_KEY = 'group';
 let categoriesByColumn = {
     'group': ['LK', '家人', '男方親戚', '女方親戚', '中學同學']
 };
+let legacyLabelKeys = null;
 let activeSelectElement = null;
 let activeColumnKey = null;
 
@@ -22,8 +23,16 @@ function normalizeGuestTags(val) {
     if (Array.isArray(val)) return val.map(t => String(t).trim()).filter(t => t && t !== '未分類');
     const s = String(val).trim();
     if (!s || s === '未分類') return [];
+    if (s.includes(';')) return s.split(';').map(t => t.trim()).filter(t => t && t !== '未分類');
     if (s.includes('|')) return s.split('|').map(t => t.trim()).filter(t => t && t !== '未分類');
     return [s];
+}
+
+function getGuestTags(guest) {
+    const keys = legacyLabelKeys || [PRIMARY_TAG_KEY];
+    const tags = new Set();
+    keys.forEach(k => normalizeGuestTags(guest[k]).forEach(t => tags.add(t)));
+    return [...tags];
 }
 
 function getPrimaryGroup(guest) {
@@ -38,8 +47,10 @@ function applyMetaLabelColumns(meta) {
             (meta.categories?.[k] || []).forEach(c => mergedPool.add(c));
         });
         categoriesByColumn = { [PRIMARY_TAG_KEY]: [...mergedPool] };
+        legacyLabelKeys = meta.keys.length > 1 ? meta.keys : null;
     } else if (meta && meta.categories) {
         categoriesByColumn = meta.categories;
+        legacyLabelKeys = null;
     }
 }
 
@@ -78,6 +89,7 @@ function buildTagAddSelectHTML(columnKey, selectedTags, side = getModalGuestSide
     let optsHTML = `<option value="">＋</option>`;
     optsHTML += available.map(cat => `<option value="${cat}">${cat}</option>`).join('');
     optsHTML += `<option value="__NEW__" class="text-blue-600 font-bold">+ 新增自訂...</option>`;
+    optsHTML += `<option value="__DELETE__" class="text-red-600 font-bold">− 刪除標籤...</option>`;
     return `<select onchange="handleModalTagAdd(this, '${columnKey}')" class="row-tag-add-select row-tag-add-select-${columnKey} border ${c.select} rounded px-2 py-1 font-bold focus:bg-white shrink-0">${optsHTML}</select>`;
 }
 
@@ -131,8 +143,95 @@ function handleModalTagAdd(selectEl, columnKey) {
         selectEl.value = '';
         return;
     }
+    if (val === '__DELETE__') {
+        openDeleteTagDialog(columnKey, selectEl);
+        selectEl.value = '';
+        return;
+    }
     insertModalTagChip(columnKey, val);
     refreshModalTagAddSelect(columnKey);
+}
+
+function forEachAssignedGuest(callback) {
+    if (!allGuests) return;
+    const processTable = table => {
+        if (Array.isArray(table)) table.forEach(callback);
+    };
+    if (Array.isArray(allGuests)) {
+        allGuests.forEach(processTable);
+    } else if (typeof allGuests === 'object') {
+        Object.values(allGuests).forEach(processTable);
+    }
+}
+
+function collectAllGuestsInSeating() {
+    const guests = [];
+    forEachAssignedGuest(g => { if (g && g.name) guests.push(g); });
+    if (Array.isArray(unassignedPool)) {
+        unassignedPool.forEach(g => { if (g && g.name) guests.push(g); });
+    }
+    return guests;
+}
+
+function getGuestsUsingTagInSeating(tag) {
+    return collectAllGuestsInSeating().filter(g => getGuestTags(g).includes(tag));
+}
+
+function populateDeleteTagSelect(columnKey) {
+    const select = document.getElementById('delete-tag-select');
+    const pool = (categoriesByColumn[columnKey] || []).filter(t => t && t !== '未分類');
+    select.innerHTML = pool.length
+        ? pool.map(t => `<option value="${t.replace(/"/g, '&quot;')}">${t}</option>`).join('')
+        : '<option value="">（無可刪除標籤）</option>';
+}
+
+function updateDeleteTagUsageHint() {
+    const select = document.getElementById('delete-tag-select');
+    const hint = document.getElementById('delete-tag-usage-hint');
+    const btn = document.getElementById('btn-confirm-delete-tag');
+    const tag = select.value;
+    if (!tag) {
+        hint.textContent = '目前標籤清單為空。';
+        btn.disabled = true;
+        return;
+    }
+    const users = getGuestsUsingTagInSeating(tag);
+    if (users.length > 0) {
+        const names = users.map(g => g.name).join('、');
+        hint.innerHTML = `<span class="text-red-600 font-bold">尚有 ${users.length} 位賓客使用中：</span>${names}`;
+        btn.disabled = true;
+    } else {
+        hint.innerHTML = '<span class="text-green-700 font-bold">無人使用此標籤，可安全刪除。</span>';
+        btn.disabled = false;
+    }
+}
+
+function openDeleteTagDialog(columnKey, selectEl) {
+    activeSelectElement = selectEl;
+    activeColumnKey = columnKey;
+    populateDeleteTagSelect(columnKey);
+    updateDeleteTagUsageHint();
+    showModal(document.getElementById('delete-tag-dialog-overlay'));
+}
+
+function closeDeleteTagDialog(isConfirm) {
+    hideModal(document.getElementById('delete-tag-dialog-overlay'));
+    if (isConfirm && activeColumnKey) {
+        const tag = document.getElementById('delete-tag-select').value;
+        if (tag && getGuestsUsingTagInSeating(tag).length === 0) {
+            const pool = categoriesByColumn[activeColumnKey];
+            const idx = pool.indexOf(tag);
+            if (idx !== -1) {
+                pool.splice(idx, 1);
+                persistMetaLabelColumns();
+                refreshModalTagAddSelect(activeColumnKey);
+                alert(`✅ 已刪除標籤「${tag}」`);
+            }
+        }
+    }
+    if (activeSelectElement) activeSelectElement.value = '';
+    activeSelectElement = null;
+    activeColumnKey = null;
 }
 
 function removeModalTag(btn, columnKey) {
