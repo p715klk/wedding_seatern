@@ -8,6 +8,8 @@ const database = firebase.database();
 // 同 seating 畫布一致 — 直接用 table_settings 嘅 x/y
 const TABLE_DIM = 420;
 const FLOOR_PLAN_PADDING = 20;
+const FLOOR_TABLE_PX = 80; // 簽到頁固定正方形枱（唔跟 viewport 縮細）
+const FLOOR_CANVAS_SCALE = FLOOR_TABLE_PX / TABLE_DIM;
 
 function buildFloorPlanFromTableSettings(settings) {
     const normalized = normalizeTableSettings(settings);
@@ -112,28 +114,36 @@ function createTableCard(num) {
 }
 
 function renderFloorPlan(layout) {
-    const { items = [], bounds, tableSize = TABLE_DIM } = layout || {};
+    const { items = [], bounds } = layout || {};
 
     floorPlan.innerHTML = '';
     if (!items.length || !bounds) {
-        floorPlan.style.aspectRatio = '';
+        floorPlan.style.width = '';
+        floorPlan.style.height = '';
         if (floorPlanHint) floorPlanHint.classList.add('hidden');
         return;
     }
 
-    floorPlan.style.aspectRatio = `${bounds.width} / ${bounds.height}`;
+    const scale = FLOOR_CANVAS_SCALE;
+    floorPlan.style.width = `${Math.ceil(bounds.width * scale)}px`;
+    floorPlan.style.height = `${Math.ceil(bounds.height * scale)}px`;
+    floorPlan.style.setProperty('--floor-table-px', `${FLOOR_TABLE_PX}px`);
 
     items.forEach(({ num, x, y }) => {
         const div = createTableCard(num);
-        div.style.left = `${((x - bounds.minX) / bounds.width) * 100}%`;
-        div.style.top = `${((y - bounds.minY) / bounds.height) * 100}%`;
-        div.style.width = `${(tableSize / bounds.width) * 100}%`;
-        div.style.height = `${(tableSize / bounds.height) * 100}%`;
+        div.style.left = `${(x - bounds.minX) * scale}px`;
+        div.style.top = `${(y - bounds.minY) * scale}px`;
         floorPlan.appendChild(div);
     });
 
     if (floorPlanHint) {
-        floorPlanHint.classList.toggle('hidden', bounds.height / bounds.width <= 1.5);
+        requestAnimationFrame(() => {
+            const needsScroll = floorPlanWrap && (
+                floorPlan.offsetWidth > floorPlanWrap.clientWidth ||
+                floorPlan.offsetHeight > floorPlanWrap.clientHeight
+            );
+            floorPlanHint.classList.toggle('hidden', !needsScroll);
+        });
     }
 }
 
