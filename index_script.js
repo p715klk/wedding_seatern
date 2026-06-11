@@ -11,6 +11,12 @@ const CANVAS_COL_UNIT = 220;
 const CANVAS_ROW_UNIT = 230;
 const FLOOR_REF_COLS = 4;
 
+function compactAxisMap(values) {
+    const map = new Map();
+    [...new Set(values)].sort((a, b) => a - b).forEach((v, i) => map.set(v, i));
+    return map;
+}
+
 function resolvePlacementCollision(placed) {
     const occupied = new Map();
     placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
@@ -63,39 +69,29 @@ function computeFloorLayoutFromTableSettings(settings) {
 
     resolvePlacementCollision(placed);
 
-    // 保留空白欄/行 → 位置同 seating 畫布一致（15 在最右就喺最右）
-    const numCols = Math.max(...placed.map(t => t.col)) + 1;
-    const numHalfRows = Math.max(...placed.map(t => t.row)) + 2;
+    const colMap = compactAxisMap(placed.map(t => t.col));
+    const rowMap = compactAxisMap(placed.map(t => t.row));
 
     const items = placed.map(t => ({
         num: t.num,
-        gridCol: t.col + 1,
-        rowStart: t.row + 1,
+        gridCol: colMap.get(t.col) + 1,
+        rowStart: rowMap.get(t.row) + 1,
         rowSpan: 2
     }));
+
+    const numCols = colMap.size;
+    const numHalfRows = Math.max(...items.map(i => i.rowStart + i.rowSpan - 1));
 
     return { items, numHalfRows, numCols };
 }
 
 function syncFloorCellSize(numCols) {
     if (!floorPlanWrap) return;
-    const gapPx = 12;
-    const wrapW = floorPlanWrap.clientWidth || 544;
-    const refCols = Math.min(Math.max(numCols, 1), FLOOR_REF_COLS);
-    const cellW = Math.floor((wrapW - gapPx * (refCols - 1)) / refCols);
-    floorPlan.style.setProperty('--floor-cell', `${Math.max(cellW, 72)}px`);
-
-    if (numCols <= FLOOR_REF_COLS) {
-        floorPlan.style.gridTemplateColumns = `repeat(${Math.max(numCols, 1)}, minmax(0, 1fr))`;
-        floorPlan.style.width = '100%';
-        if (floorPlanHint) floorPlanHint.classList.add('hidden');
-    } else {
-        floorPlan.style.gridTemplateColumns = `repeat(${numCols}, var(--floor-cell))`;
-        floorPlan.style.width = 'max-content';
-        if (floorPlanHint) floorPlanHint.classList.remove('hidden');
-    }
-
-    floorPlan.dataset.cols = String(numCols);
+    floorPlan.style.gridTemplateColumns = `repeat(${Math.max(numCols, 1)}, minmax(0, 1fr))`;
+    floorPlan.style.width = '100%';
+    floorPlan.style.transform = '';
+    floorPlan.dataset.cols = String(numCols || FLOOR_REF_COLS);
+    if (floorPlanHint) floorPlanHint.classList.add('hidden');
 }
 
 let dbData = {};

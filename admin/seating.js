@@ -622,6 +622,12 @@ const FLOOR_REF_COLS = 4;
 const CANVAS_COL_UNIT = 220;
 const CANVAS_ROW_UNIT = 230;
 
+function compactAxisMap(values) {
+    const map = new Map();
+    [...new Set(values)].sort((a, b) => a - b).forEach((v, i) => map.set(v, i));
+    return map;
+}
+
 function resolvePlacementCollision(placed) {
     const occupied = new Map();
     placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
@@ -673,15 +679,18 @@ function computeFloorLayoutFromTableSettings(settings) {
 
     resolvePlacementCollision(placed);
 
-    const numCols = Math.max(...placed.map(t => t.col)) + 1;
-    const numHalfRows = Math.max(...placed.map(t => t.row)) + 2;
+    const colMap = compactAxisMap(placed.map(t => t.col));
+    const rowMap = compactAxisMap(placed.map(t => t.row));
 
     const items = placed.map(t => ({
         num: t.num,
-        gridCol: t.col + 1,
-        rowStart: t.row + 1,
+        gridCol: colMap.get(t.col) + 1,
+        rowStart: rowMap.get(t.row) + 1,
         rowSpan: 2
     }));
+
+    const numCols = colMap.size;
+    const numHalfRows = Math.max(...items.map(i => i.rowStart + i.rowSpan - 1));
 
     return { items, numHalfRows, numCols };
 }
