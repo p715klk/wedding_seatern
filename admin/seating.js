@@ -35,6 +35,48 @@ function getTableSettingKeys() {
         })
         .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
 }
+
+let tableSettingsMigrated = false;
+
+function loadTableSettings(raw) {
+    const normalized = normalizeTableSettings(raw);
+    if (Array.isArray(raw) && Object.keys(normalized).length && !tableSettingsMigrated) {
+        tableSettingsMigrated = true;
+        database.ref('table_settings').set(normalized).catch(err => {
+            console.warn('table_settings 轉換 object 失敗:', err);
+            tableSettingsMigrated = false;
+        });
+    }
+    return normalized;
+}
+
+function persistTableSettings() {
+    return database.ref('table_settings').set(tableSettings);
+}
+
+function ensureDefaultTablesIfEmpty() {
+    if (getTableSettingKeys().length > 0) return false;
+
+    let created = false;
+    for (let i = 1; i <= 14; i++) {
+        const row = Math.floor((i - 1) / 4);
+        const col = (i - 1) % 4;
+        const colGap = 440;
+        const rowGap = 460;
+        const gridW = 3 * colGap + TABLE_DIM;
+        const gridH = 3 * rowGap + TABLE_TOTAL_H;
+        const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
+        const startY = snapToGrid(CANVAS_H / 2 - gridH / 2);
+        tableSettings[String(i)] = {
+            max_seats: 12,
+            x: snapToGrid(startX + col * colGap),
+            y: snapToGrid(startY + row * rowGap)
+        };
+        created = true;
+    }
+    return created;
+}
+
 let selectedGuestContext = null;
 
 const PRIMARY_TAG_KEY = 'group';
@@ -1677,30 +1719,11 @@ function handleSeatingDataRoot(root) {
     root = root || {};
     allGuests = root.wedding_guests || [];
     unassignedPool = root.unassigned_guests || [];
-    tableSettings = normalizeTableSettings(root.table_settings);
+    tableSettings = loadTableSettings(root.table_settings);
     applyMetaLabelColumns(root.meta_label_columns);
 
-    let updatedSettings = false;
-    for (let i = 1; i <= 14; i++) {
-        if (!tableSettings[String(i)]) {
-            const row = Math.floor((i - 1) / 4);
-            const col = (i - 1) % 4;
-            const colGap = 440;
-            const rowGap = 460;
-            const gridW = 3 * colGap + TABLE_DIM;
-            const gridH = 3 * rowGap + TABLE_TOTAL_H;
-            const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
-            const startY = snapToGrid(CANVAS_H / 2 - gridH / 2);
-            tableSettings[String(i)] = {
-                max_seats: 12,
-                x: snapToGrid(startX + col * colGap),
-                y: snapToGrid(startY + row * rowGap)
-            };
-            updatedSettings = true;
-        }
-    }
-    if (updatedSettings) {
-        database.ref('table_settings').set(tableSettings).catch(err => {
+    if (ensureDefaultTablesIfEmpty()) {
+        persistTableSettings().catch(err => {
             console.warn('table_settings 初始化失敗:', err);
         });
         bootstrapSeatingView();
@@ -2231,10 +2254,14 @@ function saveTableSettingsAction() {
     };
 
     if (newNum === oldNum) {
+        tableSettings[oldNum] = { ...tableSettings[oldNum], max_seats: newMax, label: newLabel };
         database.ref(`table_settings/${oldNum}`).update({
             max_seats: newMax,
             label: newLabel
-        }).then(() => closeSettingsModal());
+        }).then(() => {
+            scheduleFloorLayoutSync();
+            closeSettingsModal();
+        });
         return;
     }
 
@@ -2245,29 +2272,56 @@ function saveTableSettingsAction() {
         return { ...g, table: newIdx };
     });
 
+    delete tableSettings[oldNum];
+    tableSettings[newNum] = newSettings;
+    if (Array.isArray(allGuests)) {
+        allGuests[newIdx] = guests;
+        allGuests[oldIdx] = [];
+    }
+
     const updates = {};
     updates[`table_settings/${newNum}`] = newSettings;
     updates[`table_settings/${oldNum}`] = null;
     updates[`wedding_guests/${newIdx}`] = guests;
     updates[`wedding_guests/${oldIdx}`] = null;
 
-    database.ref().update(updates).then(() => closeSettingsModal());
+    database.ref().update(updates).then(() => {
+        scheduleFloorLayoutSync();
+        closeSettingsModal();
+    }).catch(err => alert(`❌ 儲存失敗：${err.message || err}`));
 }
 
 function deleteTableAction() {
     if (!activeSettingTableNum) return;
-    if (confirm(`⚠️ 確定要刪除第 ${activeSettingTableNum} 桌嗎？所有人會退回左側。`)) {
-        const idx = parseInt(activeSettingTableNum);
-        const guestsInTable = allGuests[idx] || [];
-        guestsInTable.forEach(g => { if (g && g.name) { g.sort = 99; unassignedPool.push(g); } });
-        allGuests[idx] = [];
-        
-        Promise.all([
-            database.ref(`wedding_guests/${idx}`).remove(),
-            database.ref(`unassigned_guests`).set(unassignedPool),
-            database.ref(`table_settings/${activeSettingTableNum}`).remove()
-        ]).then(() => { closeSettingsModal(); });
-    }
+    const tableNum = String(activeSettingTableNum);
+    if (!confirm(`⚠️ 確定要刪除第 ${tableNum} 桌嗎？所有人會退回左側。`)) return;
+
+    const idx = parseInt(tableNum, 10);
+    const guestsInTable = Array.isArray(allGuests[idx]) ? allGuests[idx] : [];
+    if (!Array.isArray(unassignedPool)) unassignedPool = [];
+
+    guestsInTable.forEach(g => {
+        if (g && g.name) {
+            g.sort = 99;
+            unassignedPool.push(g);
+        }
+    });
+    if (Array.isArray(allGuests)) allGuests[idx] = [];
+
+    delete tableSettings[tableNum];
+
+    const updates = {
+        [`wedding_guests/${idx}`]: null,
+        [`table_settings/${tableNum}`]: null
+    };
+
+    Promise.all([
+        database.ref().update(updates),
+        database.ref('unassigned_guests').set(unassignedPool)
+    ]).then(() => {
+        scheduleFloorLayoutSync();
+        closeSettingsModal();
+    }).catch(err => alert(`❌ 刪除失敗：${err.message || err}`));
 }
 
 applyPrintPageStyle();
