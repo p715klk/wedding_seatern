@@ -5,9 +5,11 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-const FLOOR_GRID_COLS = 4;
 const TABLE_PLATE_CENTER = 210;
-const EMPTY_FLOOR_ROW = ['.', '.', '.', '.'];
+// seating 畫布 colGap=440、rowGap=460，簽到頁用一半粒度（2× 解像度）
+const FINE_COL_UNIT = 220;
+const FINE_ROW_UNIT = 230;
+const FINE_GRID_PAD = 1;
 
 let dbData = {};
 let statusState = {};
@@ -59,20 +61,38 @@ function normalizeTableSettings(raw) {
     return normalized;
 }
 
-function resolveGridColumn(row, preferredCol) {
-    if (row[preferredCol] === '.') return preferredCol;
-    for (let d = 1; d < FLOOR_GRID_COLS; d++) {
-        if (preferredCol - d >= 0 && row[preferredCol - d] === '.') return preferredCol - d;
-        if (preferredCol + d < FLOOR_GRID_COLS && row[preferredCol + d] === '.') return preferredCol + d;
-    }
-    return -1;
+function resolveFineGridCollision(placed) {
+    const occupied = new Map();
+    placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
+
+    placed.forEach(t => {
+        let { col, row } = t;
+        while (occupied.has(`${row},${col}`)) {
+            const tryDirs = [[0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [1, -1]];
+            let moved = false;
+            for (const [dr, dc] of tryDirs) {
+                const nr = t.row + dr;
+                const nc = t.col + dc;
+                if (!occupied.has(`${nr},${nc}`)) {
+                    row = nr;
+                    col = nc;
+                    moved = true;
+                    break;
+                }
+            }
+            if (!moved) col++;
+        }
+        t.row = row;
+        t.col = col;
+        occupied.set(`${row},${col}`, t.num);
+    });
 }
 
-// 依 seating 畫布 x/y 推算 4 欄靚仔格子（枱數不限）
+// 依 seating x/y 量化成細格（枱數不限；13 可喺 4 同 6 右側之間）
 function computeFloorLayoutFromTableSettings(settings) {
     const normalized = normalizeTableSettings(settings);
     const nums = Object.keys(normalized);
-    if (!nums.length) return [EMPTY_FLOOR_ROW.slice()];
+    if (!nums.length) return { cols: 4, rows: [['.', '.', '.', '.']] };
 
     const tables = nums.map(num => ({
         num: String(num),
@@ -80,80 +100,62 @@ function computeFloorLayoutFromTableSettings(settings) {
         cy: normalized[num].y + TABLE_PLATE_CENTER
     }));
 
-    const allCx = tables.map(t => t.cx);
-    const globalMinX = Math.min(...allCx);
-    const globalMaxX = Math.max(...allCx);
-    const globalSpan = Math.max(globalMaxX - globalMinX, 1);
+    const minCx = Math.min(...tables.map(t => t.cx));
+    const minCy = Math.min(...tables.map(t => t.cy));
+    const anchorX = minCx - FINE_COL_UNIT * FINE_GRID_PAD;
+    const anchorY = minCy - FINE_ROW_UNIT * FINE_GRID_PAD;
 
-    function xToColumn(cx) {
-        return Math.min(
-            FLOOR_GRID_COLS - 1,
-            Math.max(0, Math.round(((cx - globalMinX) / globalSpan) * (FLOOR_GRID_COLS - 1)))
-        );
+    const placed = tables.map(t => ({
+        num: t.num,
+        col: Math.round((t.cx - anchorX) / FINE_COL_UNIT),
+        row: Math.round((t.cy - anchorY) / FINE_ROW_UNIT)
+    }));
+
+    resolveFineGridCollision(placed);
+
+    const minCol = Math.min(...placed.map(t => t.col));
+    const maxCol = Math.max(...placed.map(t => t.col));
+    const minRow = Math.min(...placed.map(t => t.row));
+    const maxRow = Math.max(...placed.map(t => t.row));
+    const cols = maxCol - minCol + 1 + FINE_GRID_PAD;
+
+    const rows = [];
+    for (let r = minRow; r <= maxRow + FINE_GRID_PAD; r++) {
+        rows.push(Array(cols).fill('.'));
     }
 
-    tables.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
-
-    const rowThreshold = 320;
-    const rowGroups = [];
-    let bucket = [];
-    let rowCenterY = null;
-
-    tables.forEach(t => {
-        if (rowCenterY === null || Math.abs(t.cy - rowCenterY) > rowThreshold) {
-            if (bucket.length) rowGroups.push(bucket);
-            bucket = [t];
-            rowCenterY = t.cy;
-        } else {
-            bucket.push(t);
-            rowCenterY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
+    placed.forEach(t => {
+        const rIdx = t.row - minRow;
+        const cIdx = t.col - minCol;
+        if (rows[rIdx] && cIdx >= 0 && cIdx < cols) {
+            rows[rIdx][cIdx] = t.num;
         }
     });
-    if (bucket.length) rowGroups.push(bucket);
 
-    const layout = [];
-
-    rowGroups.forEach(group => {
-        const gridRow = EMPTY_FLOOR_ROW.slice();
-        const overflow = [];
-
-        group.sort((a, b) => a.cx - b.cx);
-        group.forEach(t => {
-            let col = resolveGridColumn(gridRow, xToColumn(t.cx));
-            if (col >= 0) {
-                gridRow[col] = t.num;
-            } else {
-                overflow.push(t);
-            }
-        });
-
-        layout.push(gridRow);
-
-        overflow.forEach(t => {
-            const extraRow = EMPTY_FLOOR_ROW.slice();
-            extraRow[xToColumn(t.cx)] = t.num;
-            layout.push(extraRow);
-        });
-    });
-
-    return layout.length ? layout : [EMPTY_FLOOR_ROW.slice()];
+    return { cols, rows };
 }
 
-function renderFloorPlan(layout) {
-    const grid = Array.isArray(layout) && layout.length ? layout : [EMPTY_FLOOR_ROW.slice()];
+function renderFloorPlan(layoutData) {
+    const { cols, rows } = layoutData?.rows
+        ? layoutData
+        : { cols: 4, rows: [['.', '.', '.', '.']] };
+
+    floorPlan.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
     floorPlan.innerHTML = '';
-    grid.forEach(row => {
+
+    rows.forEach(row => {
         row.forEach(cell => {
             const div = document.createElement('div');
             if (cell === '.') {
-                div.className = 'h-20';
+                div.className = 'h-8';
+                div.setAttribute('aria-hidden', 'true');
             } else {
-                div.className = 'bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center h-24 cursor-pointer hover:border-red-400 transition active:scale-95';
+                div.className = 'bg-white p-1.5 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center h-20 cursor-pointer hover:border-red-400 transition active:scale-95';
                 div.id = `table-card-${cell}`;
                 div.setAttribute('onclick', `openModal('${cell}')`);
                 div.innerHTML = `
-                    <span class="text-sm font-bold text-gray-500">第 ${cell} 桌</span>
-                    <div class="w-12 h-12 rounded-full border-4 border-gray-300 flex items-center justify-center text-xs font-black text-gray-400" id="table-circle-${cell}">0%</div>
+                    <span class="text-xs font-bold text-gray-500">第 ${cell} 桌</span>
+                    <div class="w-10 h-10 rounded-full border-4 border-gray-300 flex items-center justify-center text-[10px] font-black text-gray-400" id="table-circle-${cell}">0%</div>
                 `;
             }
             floorPlan.appendChild(div);
@@ -161,7 +163,7 @@ function renderFloorPlan(layout) {
     });
 }
 
-renderFloorPlan([EMPTY_FLOOR_ROW.slice()]);
+renderFloorPlan({ cols: 4, rows: [['.', '.', '.', '.']] });
 
 // Firebase 即時監聽 — 排位跟 table_settings 動態更新
 database.ref().on('value', (snapshot) => {

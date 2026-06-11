@@ -10,7 +10,11 @@ html, body {
     touch-action: manipulation;
 }
 
-/* 🚨 鎖死 iPhone 點擊輸入框自動放大 */
+/* 簽到頁平面圖 — 欄數由 JS 依枱位動態設定 */
+#floor-plan {
+    display: grid;
+    gap: 0.5rem;
+}
 @media screen and (max-width: 768px) {
     input, select, textarea, .excel-input, .table-select {
         font-size: 16px !important;

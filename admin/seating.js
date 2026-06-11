@@ -618,26 +618,42 @@ function zoomCanvas(factor) {
     );
 }
 
-const FLOOR_GRID_COLS = 4;
+const FINE_COL_UNIT = 220;
+const FINE_ROW_UNIT = 230;
+const FINE_GRID_PAD = 1;
 
-function makeEmptyFloorRow() {
-    return ['.', '.', '.', '.'];
+function resolveFineGridCollision(placed) {
+    const occupied = new Map();
+    placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
+
+    placed.forEach(t => {
+        let { col, row } = t;
+        while (occupied.has(`${row},${col}`)) {
+            const tryDirs = [[0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [1, -1]];
+            let moved = false;
+            for (const [dr, dc] of tryDirs) {
+                const nr = t.row + dr;
+                const nc = t.col + dc;
+                if (!occupied.has(`${nr},${nc}`)) {
+                    row = nr;
+                    col = nc;
+                    moved = true;
+                    break;
+                }
+            }
+            if (!moved) col++;
+        }
+        t.row = row;
+        t.col = col;
+        occupied.set(`${row},${col}`, t.num);
+    });
 }
 
-function resolveFloorGridColumn(row, preferredCol) {
-    if (row[preferredCol] === '.') return preferredCol;
-    for (let d = 1; d < FLOOR_GRID_COLS; d++) {
-        if (preferredCol - d >= 0 && row[preferredCol - d] === '.') return preferredCol - d;
-        if (preferredCol + d < FLOOR_GRID_COLS && row[preferredCol + d] === '.') return preferredCol + d;
-    }
-    return -1;
-}
-
-// 依 seating 畫布 x/y 座標推算簽到頁 4 欄排位（枱數不限）
+// 依 seating 畫布 x/y 量化成細格（枱數不限）
 function computeFloorLayoutFromTableSettings(settings) {
     const normalized = normalizeTableSettings(settings);
     const nums = Object.keys(normalized);
-    if (!nums.length) return [makeEmptyFloorRow()];
+    if (!nums.length) return { cols: 4, rows: [['.', '.', '.', '.']] };
 
     const tables = nums.map(num => ({
         num: String(num),
@@ -645,63 +661,39 @@ function computeFloorLayoutFromTableSettings(settings) {
         cy: normalized[num].y + PLATE_CENTER
     }));
 
-    const allCx = tables.map(t => t.cx);
-    const globalMinX = Math.min(...allCx);
-    const globalMaxX = Math.max(...allCx);
-    const globalSpan = Math.max(globalMaxX - globalMinX, 1);
+    const minCx = Math.min(...tables.map(t => t.cx));
+    const minCy = Math.min(...tables.map(t => t.cy));
+    const anchorX = minCx - FINE_COL_UNIT * FINE_GRID_PAD;
+    const anchorY = minCy - FINE_ROW_UNIT * FINE_GRID_PAD;
 
-    function xToColumn(cx) {
-        return Math.min(
-            FLOOR_GRID_COLS - 1,
-            Math.max(0, Math.round(((cx - globalMinX) / globalSpan) * (FLOOR_GRID_COLS - 1)))
-        );
+    const placed = tables.map(t => ({
+        num: t.num,
+        col: Math.round((t.cx - anchorX) / FINE_COL_UNIT),
+        row: Math.round((t.cy - anchorY) / FINE_ROW_UNIT)
+    }));
+
+    resolveFineGridCollision(placed);
+
+    const minCol = Math.min(...placed.map(t => t.col));
+    const maxCol = Math.max(...placed.map(t => t.col));
+    const minRow = Math.min(...placed.map(t => t.row));
+    const maxRow = Math.max(...placed.map(t => t.row));
+    const cols = maxCol - minCol + 1 + FINE_GRID_PAD;
+
+    const rows = [];
+    for (let r = minRow; r <= maxRow + FINE_GRID_PAD; r++) {
+        rows.push(Array(cols).fill('.'));
     }
 
-    tables.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
-
-    const rowThreshold = 320;
-    const rowGroups = [];
-    let bucket = [];
-    let rowCenterY = null;
-
-    tables.forEach(t => {
-        if (rowCenterY === null || Math.abs(t.cy - rowCenterY) > rowThreshold) {
-            if (bucket.length) rowGroups.push(bucket);
-            bucket = [t];
-            rowCenterY = t.cy;
-        } else {
-            bucket.push(t);
-            rowCenterY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
+    placed.forEach(t => {
+        const rIdx = t.row - minRow;
+        const cIdx = t.col - minCol;
+        if (rows[rIdx] && cIdx >= 0 && cIdx < cols) {
+            rows[rIdx][cIdx] = t.num;
         }
     });
-    if (bucket.length) rowGroups.push(bucket);
 
-    const layout = [];
-
-    rowGroups.forEach(group => {
-        const gridRow = makeEmptyFloorRow();
-        const overflow = [];
-
-        group.sort((a, b) => a.cx - b.cx);
-        group.forEach(t => {
-            const col = resolveFloorGridColumn(gridRow, xToColumn(t.cx));
-            if (col >= 0) {
-                gridRow[col] = t.num;
-            } else {
-                overflow.push(t);
-            }
-        });
-
-        layout.push(gridRow);
-
-        overflow.forEach(t => {
-            const extraRow = makeEmptyFloorRow();
-            extraRow[xToColumn(t.cx)] = t.num;
-            layout.push(extraRow);
-        });
-    });
-
-    return layout.length ? layout : [makeEmptyFloorRow()];
+    return { cols, rows };
 }
 
 function buildSignInFloorLayout(settings) {
@@ -712,10 +704,16 @@ let lastPersistedFloorLayoutJson = null;
 
 function normalizeFloorLayout(layout) {
     if (!layout) return null;
+    if (layout.cols != null && Array.isArray(layout.rows)) {
+        return {
+            cols: Number(layout.cols) || layout.rows[0]?.length || 4,
+            rows: layout.rows.map(row => (Array.isArray(row) ? row : Object.values(row)).map(cell => String(cell)))
+        };
+    }
     const rows = Array.isArray(layout) ? layout : Object.keys(layout)
         .sort((a, b) => Number(a) - Number(b))
         .map(k => layout[k]);
-    return rows.map(row => {
+    const normalizedRows = rows.map(row => {
         if (Array.isArray(row)) return row.map(cell => String(cell));
         if (row && typeof row === 'object') {
             return Object.keys(row)
@@ -724,6 +722,7 @@ function normalizeFloorLayout(layout) {
         }
         return [String(row)];
     });
+    return { cols: normalizedRows[0]?.length || 4, rows: normalizedRows };
 }
 
 function syncFloorLayoutIfNeeded(existingLayout) {
