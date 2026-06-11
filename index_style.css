@@ -10,11 +10,44 @@ html, body {
     touch-action: manipulation;
 }
 
-/* 簽到頁平面圖 — 欄數由 JS 依枱位動態設定 */
-#floor-plan {
-    display: grid;
-    gap: 0.5rem;
+/* 簽到頁平面圖 — 固定卡片尺寸（以 4 欄為基準），枱多時可捲動 */
+.floor-plan-wrap {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
 }
+
+#floor-plan {
+    --floor-gap: 0.75rem;
+    --floor-base-cols: 4;
+    --floor-cell: 7.75rem;
+    display: grid;
+    gap: var(--floor-gap);
+    text-align: center;
+    margin: 0 auto;
+    width: max-content;
+    max-width: 100%;
+}
+
+#floor-plan.floor-plan-fit {
+    width: 100%;
+}
+
+#floor-plan.floor-plan-fit .floor-cell-empty,
+#floor-plan.floor-plan-fit .floor-cell-table {
+    width: 100%;
+}
+
+#floor-plan .floor-cell-empty {
+    width: var(--floor-cell);
+    height: 5rem;
+}
+
+#floor-plan .floor-cell-table {
+    width: var(--floor-cell);
+    height: 6rem;
+}
+
 @media screen and (max-width: 768px) {
     input, select, textarea, .excel-input, .table-select {
         font-size: 16px !important;

@@ -34,7 +34,12 @@
         <div class="bg-gray-300 text-center py-2 rounded font-bold shadow-inner tracking-widest text-gray-700">舞台 STAGE</div>
     </div>
 
-    <main class="max-w-xl mx-auto p-4 text-center" id="floor-plan"></main>
+    <div class="max-w-xl mx-auto px-4 pb-4">
+        <div id="floor-plan-wrap" class="floor-plan-wrap">
+            <main id="floor-plan" aria-label="婚宴枱位平面圖"></main>
+        </div>
+        <p id="floor-plan-hint" class="hidden text-center text-xs text-gray-400 mt-2">↔ 枱位較多，可左右滑動查看</p>
+    </div>
 
     <div id="guest-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4" data-current-table="">
         <div class="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
@@ -50,6 +55,6 @@
         </div>
     </div>
 
-    <script src="index_script.js?v=8"></script>
+    <script src="index_script.js?v=9"></script>
 </body>
 </html>

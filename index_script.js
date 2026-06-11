@@ -10,11 +10,14 @@ const TABLE_PLATE_CENTER = 210;
 const FINE_COL_UNIT = 220;
 const FINE_ROW_UNIT = 230;
 const FINE_GRID_PAD = 1;
+const FLOOR_BASE_COLS = 4;
 
 let dbData = {};
 let statusState = {};
 let currentFloorLayoutJson = '';
 const floorPlan = document.getElementById('floor-plan');
+const floorPlanWrap = document.getElementById('floor-plan-wrap');
+const floorPlanHint = document.getElementById('floor-plan-hint');
 
 function normalizeGuestTags(val) {
     if (!val) return [];
@@ -135,33 +138,79 @@ function computeFloorLayoutFromTableSettings(settings) {
     return { cols, rows };
 }
 
+function trimFloorGrid(rows) {
+    if (!rows.length) return rows;
+
+    let top = 0;
+    let bottom = rows.length - 1;
+    while (top < bottom && rows[top].every(c => c === '.')) top++;
+    while (bottom > top && rows[bottom].every(c => c === '.')) bottom--;
+
+    const trimmed = rows.slice(top, bottom + 1);
+    if (!trimmed.length) return rows;
+
+    let left = 0;
+    let right = trimmed[0].length - 1;
+    while (left < right && trimmed.every(row => row[left] === '.')) left++;
+    while (right > left && trimmed.every(row => row[right] === '.')) right++;
+
+    return trimmed.map(row => row.slice(left, right + 1));
+}
+
+function syncFloorCellSize(cols) {
+    if (!floorPlanWrap) return;
+    const gapPx = 12;
+    const wrapW = floorPlanWrap.clientWidth || 544;
+    const cellW = Math.floor((wrapW - gapPx * (FLOOR_BASE_COLS - 1)) / FLOOR_BASE_COLS);
+    floorPlan.style.setProperty('--floor-cell', `${Math.max(cellW, 72)}px`);
+
+    const useFit = cols <= FLOOR_BASE_COLS;
+    floorPlan.classList.toggle('floor-plan-fit', useFit);
+    if (useFit) {
+        floorPlan.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    } else {
+        floorPlan.style.gridTemplateColumns = `repeat(${cols}, var(--floor-cell))`;
+    }
+
+    if (floorPlanHint) {
+        floorPlanHint.classList.toggle('hidden', cols <= FLOOR_BASE_COLS);
+    }
+}
+
 function renderFloorPlan(layoutData) {
-    const { cols, rows } = layoutData?.rows
+    const raw = layoutData?.rows
         ? layoutData
         : { cols: 4, rows: [['.', '.', '.', '.']] };
+    const rows = trimFloorGrid(raw.rows.map(r => r.slice()));
+    const cols = rows[0]?.length || raw.cols || FLOOR_BASE_COLS;
 
-    floorPlan.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    syncFloorCellSize(cols);
     floorPlan.innerHTML = '';
 
     rows.forEach(row => {
         row.forEach(cell => {
             const div = document.createElement('div');
             if (cell === '.') {
-                div.className = 'h-8';
+                div.className = 'floor-cell-empty';
                 div.setAttribute('aria-hidden', 'true');
             } else {
-                div.className = 'bg-white p-1.5 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center h-20 cursor-pointer hover:border-red-400 transition active:scale-95';
+                div.className = 'floor-cell-table bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center cursor-pointer hover:border-red-400 transition active:scale-95';
                 div.id = `table-card-${cell}`;
                 div.setAttribute('onclick', `openModal('${cell}')`);
                 div.innerHTML = `
-                    <span class="text-xs font-bold text-gray-500">第 ${cell} 桌</span>
-                    <div class="w-10 h-10 rounded-full border-4 border-gray-300 flex items-center justify-center text-[10px] font-black text-gray-400" id="table-circle-${cell}">0%</div>
+                    <span class="text-sm font-bold text-gray-500">第 ${cell} 桌</span>
+                    <div class="w-12 h-12 rounded-full border-4 border-gray-300 flex items-center justify-center text-xs font-black text-gray-400" id="table-circle-${cell}">0%</div>
                 `;
             }
             floorPlan.appendChild(div);
         });
     });
 }
+
+window.addEventListener('resize', () => {
+    const cols = floorPlan.style.gridTemplateColumns.match(/repeat\((\d+)/)?.[1];
+    if (cols) syncFloorCellSize(Number(cols));
+});
 
 renderFloorPlan({ cols: 4, rows: [['.', '.', '.', '.']] });
 
