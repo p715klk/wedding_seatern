@@ -5,12 +5,13 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-const TABLE_CANVAS_SIZE = 420;
-const FLOOR_CANVAS_PAD = 28;
+const FLOOR_GRID_COLS = 4;
+const TABLE_PLATE_CENTER = 210;
+const EMPTY_FLOOR_ROW = ['.', '.', '.', '.'];
 
 let dbData = {};
 let statusState = {};
-let currentTableSettingsKey = '';
+let currentFloorLayoutJson = '';
 const floorPlan = document.getElementById('floor-plan');
 
 function normalizeGuestTags(val) {
@@ -58,77 +59,109 @@ function normalizeTableSettings(raw) {
     return normalized;
 }
 
-function getTablesBoundingBox(normalized) {
-    const nums = Object.keys(normalized);
-    if (!nums.length) return null;
-
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-
-    nums.forEach(num => {
-        const s = normalized[num];
-        minX = Math.min(minX, s.x);
-        minY = Math.min(minY, s.y);
-        maxX = Math.max(maxX, s.x + TABLE_CANVAS_SIZE);
-        maxY = Math.max(maxY, s.y + TABLE_CANVAS_SIZE);
-    });
-
-    return {
-        minX,
-        minY,
-        width: maxX - minX,
-        height: maxY - minY
-    };
+function resolveGridColumn(row, preferredCol) {
+    if (row[preferredCol] === '.') return preferredCol;
+    for (let d = 1; d < FLOOR_GRID_COLS; d++) {
+        if (preferredCol - d >= 0 && row[preferredCol - d] === '.') return preferredCol - d;
+        if (preferredCol + d < FLOOR_GRID_COLS && row[preferredCol + d] === '.') return preferredCol + d;
+    }
+    return -1;
 }
 
-function renderFloorPlanFromSettings(tableSettingsRaw) {
-    const normalized = normalizeTableSettings(tableSettingsRaw);
-    const tableNums = Object.keys(normalized).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+// 依 seating 畫布 x/y 推算 4 欄靚仔格子（枱數不限）
+function computeFloorLayoutFromTableSettings(settings) {
+    const normalized = normalizeTableSettings(settings);
+    const nums = Object.keys(normalized);
+    if (!nums.length) return [EMPTY_FLOOR_ROW.slice()];
 
-    floorPlan.innerHTML = '';
-    floorPlan.style.aspectRatio = '';
-    floorPlan.style.height = '';
+    const tables = nums.map(num => ({
+        num: String(num),
+        cx: normalized[num].x + TABLE_PLATE_CENTER,
+        cy: normalized[num].y + TABLE_PLATE_CENTER
+    }));
 
-    if (!tableNums.length) {
-        floorPlan.style.minHeight = '120px';
-        return;
+    const allCx = tables.map(t => t.cx);
+    const globalMinX = Math.min(...allCx);
+    const globalMaxX = Math.max(...allCx);
+    const globalSpan = Math.max(globalMaxX - globalMinX, 1);
+
+    function xToColumn(cx) {
+        return Math.min(
+            FLOOR_GRID_COLS - 1,
+            Math.max(0, Math.round(((cx - globalMinX) / globalSpan) * (FLOOR_GRID_COLS - 1)))
+        );
     }
 
-    const bounds = getTablesBoundingBox(normalized);
-    const pad = FLOOR_CANVAS_PAD;
-    const totalW = bounds.width + pad * 2;
-    const totalH = bounds.height + pad * 2;
+    tables.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
 
-    floorPlan.style.aspectRatio = `${totalW} / ${totalH}`;
+    const rowThreshold = 320;
+    const rowGroups = [];
+    let bucket = [];
+    let rowCenterY = null;
 
-    const cardSizePct = (TABLE_CANVAS_SIZE / totalW) * 100;
+    tables.forEach(t => {
+        if (rowCenterY === null || Math.abs(t.cy - rowCenterY) > rowThreshold) {
+            if (bucket.length) rowGroups.push(bucket);
+            bucket = [t];
+            rowCenterY = t.cy;
+        } else {
+            bucket.push(t);
+            rowCenterY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
+        }
+    });
+    if (bucket.length) rowGroups.push(bucket);
 
-    tableNums.forEach(num => {
-        const s = normalized[num];
-        const cx = s.x + TABLE_CANVAS_SIZE / 2;
-        const cy = s.y + TABLE_CANVAS_SIZE / 2;
-        const leftPct = ((cx - bounds.minX + pad) / totalW) * 100;
-        const topPct = ((cy - bounds.minY + pad) / totalH) * 100;
+    const layout = [];
 
-        const card = document.createElement('div');
-        card.className = 'floor-table-card';
-        card.id = `table-card-${num}`;
-        card.style.left = `${leftPct}%`;
-        card.style.top = `${topPct}%`;
-        card.style.width = `${cardSizePct}%`;
-        card.style.aspectRatio = '1';
-        card.setAttribute('onclick', `openModal('${num}')`);
-        card.innerHTML = `
-            <span class="floor-table-label">第 ${num} 桌</span>
-            <div class="floor-table-circle" id="table-circle-${num}">0%</div>
-        `;
-        floorPlan.appendChild(card);
+    rowGroups.forEach(group => {
+        const gridRow = EMPTY_FLOOR_ROW.slice();
+        const overflow = [];
+
+        group.sort((a, b) => a.cx - b.cx);
+        group.forEach(t => {
+            let col = resolveGridColumn(gridRow, xToColumn(t.cx));
+            if (col >= 0) {
+                gridRow[col] = t.num;
+            } else {
+                overflow.push(t);
+            }
+        });
+
+        layout.push(gridRow);
+
+        overflow.forEach(t => {
+            const extraRow = EMPTY_FLOOR_ROW.slice();
+            extraRow[xToColumn(t.cx)] = t.num;
+            layout.push(extraRow);
+        });
+    });
+
+    return layout.length ? layout : [EMPTY_FLOOR_ROW.slice()];
+}
+
+function renderFloorPlan(layout) {
+    const grid = Array.isArray(layout) && layout.length ? layout : [EMPTY_FLOOR_ROW.slice()];
+    floorPlan.innerHTML = '';
+    grid.forEach(row => {
+        row.forEach(cell => {
+            const div = document.createElement('div');
+            if (cell === '.') {
+                div.className = 'h-20';
+            } else {
+                div.className = 'bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center h-24 cursor-pointer hover:border-red-400 transition active:scale-95';
+                div.id = `table-card-${cell}`;
+                div.setAttribute('onclick', `openModal('${cell}')`);
+                div.innerHTML = `
+                    <span class="text-sm font-bold text-gray-500">第 ${cell} 桌</span>
+                    <div class="w-12 h-12 rounded-full border-4 border-gray-300 flex items-center justify-center text-xs font-black text-gray-400" id="table-circle-${cell}">0%</div>
+                `;
+            }
+            floorPlan.appendChild(div);
+        });
     });
 }
 
-renderFloorPlanFromSettings({});
+renderFloorPlan([EMPTY_FLOOR_ROW.slice()]);
 
 // Firebase 即時監聽 — 排位跟 table_settings 動態更新
 database.ref().on('value', (snapshot) => {
@@ -136,10 +169,11 @@ database.ref().on('value', (snapshot) => {
     dbData = root.wedding_guests || {};
     statusState = root.guest_status || {};
 
-    const settingsKey = JSON.stringify(normalizeTableSettings(root.table_settings));
-    if (settingsKey !== currentTableSettingsKey) {
-        currentTableSettingsKey = settingsKey;
-        renderFloorPlanFromSettings(root.table_settings);
+    const layout = computeFloorLayoutFromTableSettings(root.table_settings);
+    const layoutJson = JSON.stringify(layout);
+    if (layoutJson !== currentFloorLayoutJson) {
+        currentFloorLayoutJson = layoutJson;
+        renderFloorPlan(layout);
     }
 
     updateFloorPlanSummary();
@@ -172,14 +206,14 @@ function updateFloorPlanSummary() {
         if (circle && card) {
             circle.innerText = `${percent}%`;
             if (percent === 100 && activeCount > 0) {
-                circle.className = "floor-table-circle border-green-500 bg-green-50 text-green-600";
-                card.style.borderColor = '#22c55e';
+                circle.className = "w-12 h-12 rounded-full border-4 border-green-500 bg-green-50 flex items-center justify-center text-xs font-black text-green-600";
+                card.className = card.className.replace(/border-gray-200|border-orange-300/, 'border-green-500');
             } else if (percent > 0) {
-                circle.className = "floor-table-circle border-orange-400 bg-orange-50 text-orange-500";
-                card.style.borderColor = '#fb923c';
+                circle.className = "w-12 h-12 rounded-full border-4 border-orange-400 bg-orange-50 flex items-center justify-center text-xs font-black text-orange-500";
+                card.className = card.className.replace(/border-gray-200|border-green-500/, 'border-orange-300');
             } else {
-                circle.className = "floor-table-circle border-gray-300 bg-white text-gray-400";
-                card.style.borderColor = '#e5e7eb';
+                circle.className = "w-12 h-12 rounded-full border-4 border-gray-300 bg-white flex items-center justify-center text-xs font-black text-gray-400";
+                card.className = card.className.replace(/border-green-500|border-orange-300/, 'border-gray-200');
             }
         }
     });

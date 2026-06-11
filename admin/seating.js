@@ -630,10 +630,7 @@ function resolveFloorGridColumn(row, preferredCol) {
         if (preferredCol - d >= 0 && row[preferredCol - d] === '.') return preferredCol - d;
         if (preferredCol + d < FLOOR_GRID_COLS && row[preferredCol + d] === '.') return preferredCol + d;
     }
-    for (let c = 0; c < FLOOR_GRID_COLS; c++) {
-        if (row[c] === '.') return c;
-    }
-    return preferredCol;
+    return -1;
 }
 
 // 依 seating 畫布 x/y 座標推算簽到頁 4 欄排位（枱數不限）
@@ -648,24 +645,28 @@ function computeFloorLayoutFromTableSettings(settings) {
         cy: normalized[num].y + PLATE_CENTER
     }));
 
-    tables.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
+    const allCx = tables.map(t => t.cx);
+    const globalMinX = Math.min(...allCx);
+    const globalMaxX = Math.max(...allCx);
+    const globalSpan = Math.max(globalMaxX - globalMinX, 1);
 
-    const yBuckets = [...new Set(tables.map(t => Math.round(t.cy / 50) * 50))].sort((a, b) => a - b);
-    let rowThreshold = 280;
-    if (yBuckets.length > 1) {
-        const gaps = [];
-        for (let i = 1; i < yBuckets.length; i++) gaps.push(yBuckets[i] - yBuckets[i - 1]);
-        gaps.sort((a, b) => a - b);
-        rowThreshold = Math.max(180, Math.min(400, gaps[Math.floor(gaps.length / 2)] * 0.55));
+    function xToColumn(cx) {
+        return Math.min(
+            FLOOR_GRID_COLS - 1,
+            Math.max(0, Math.round(((cx - globalMinX) / globalSpan) * (FLOOR_GRID_COLS - 1)))
+        );
     }
 
-    const canvasRows = [];
+    tables.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
+
+    const rowThreshold = 320;
+    const rowGroups = [];
     let bucket = [];
     let rowCenterY = null;
 
     tables.forEach(t => {
         if (rowCenterY === null || Math.abs(t.cy - rowCenterY) > rowThreshold) {
-            if (bucket.length) canvasRows.push(bucket);
+            if (bucket.length) rowGroups.push(bucket);
             bucket = [t];
             rowCenterY = t.cy;
         } else {
@@ -673,39 +674,31 @@ function computeFloorLayoutFromTableSettings(settings) {
             rowCenterY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
         }
     });
-    if (bucket.length) canvasRows.push(bucket);
-
-    const allCx = tables.map(t => t.cx);
-    const globalMinX = Math.min(...allCx);
-    const globalMaxX = Math.max(...allCx);
-
-    function assignColumn(cx, rowMinX, rowMaxX, countInChunk) {
-        if (countInChunk <= 1) {
-            const span = Math.max(globalMaxX - globalMinX, 1);
-            return Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.round(((cx - globalMinX) / span) * (FLOOR_GRID_COLS - 1))));
-        }
-        const span = Math.max(rowMaxX - rowMinX, 1);
-        return Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.round(((cx - rowMinX) / span) * (FLOOR_GRID_COLS - 1))));
-    }
+    if (bucket.length) rowGroups.push(bucket);
 
     const layout = [];
 
-    canvasRows.forEach(rowTables => {
-        rowTables.sort((a, b) => a.cx - b.cx);
-        const rowMinX = rowTables[0].cx;
-        const rowMaxX = rowTables[rowTables.length - 1].cx;
+    rowGroups.forEach(group => {
+        const gridRow = makeEmptyFloorRow();
+        const overflow = [];
 
-        for (let i = 0; i < rowTables.length; i += FLOOR_GRID_COLS) {
-            const chunk = rowTables.slice(i, i + FLOOR_GRID_COLS);
-            const gridRow = makeEmptyFloorRow();
+        group.sort((a, b) => a.cx - b.cx);
+        group.forEach(t => {
+            const col = resolveFloorGridColumn(gridRow, xToColumn(t.cx));
+            if (col >= 0) {
+                gridRow[col] = t.num;
+            } else {
+                overflow.push(t);
+            }
+        });
 
-            chunk.forEach(t => {
-                const col = resolveFloorGridColumn(gridRow, assignColumn(t.cx, rowMinX, rowMaxX, chunk.length));
-                if (gridRow[col] === '.') gridRow[col] = t.num;
-            });
+        layout.push(gridRow);
 
-            layout.push(gridRow);
-        }
+        overflow.forEach(t => {
+            const extraRow = makeEmptyFloorRow();
+            extraRow[xToColumn(t.cx)] = t.num;
+            layout.push(extraRow);
+        });
     });
 
     return layout.length ? layout : [makeEmptyFloorRow()];
