@@ -17,6 +17,11 @@ function compactAxisMap(values) {
     return map;
 }
 
+// 用量化 row（唔壓縮）保留側邊枱「卡喺兩行之間」
+function getGridRowStart(quantizedRow) {
+    return quantizedRow % 2 === 0 ? quantizedRow + 1 : quantizedRow - 1;
+}
+
 function resolvePlacementCollision(placed) {
     const occupied = new Map();
     placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
@@ -70,12 +75,11 @@ function computeFloorLayoutFromTableSettings(settings) {
     resolvePlacementCollision(placed);
 
     const colMap = compactAxisMap(placed.map(t => t.col));
-    const rowMap = compactAxisMap(placed.map(t => t.row));
 
     const items = placed.map(t => ({
         num: t.num,
         gridCol: colMap.get(t.col) + 1,
-        rowStart: rowMap.get(t.row) + 1,
+        rowStart: getGridRowStart(t.row),
         rowSpan: 2
     }));
 
