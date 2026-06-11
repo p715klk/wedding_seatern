@@ -255,8 +255,8 @@
     body.admin-page header h1 {
         font-size: 1.1rem !important;
     }
-    body.admin-page header p {
-        display: none;
+    body.admin-page header .header-hint {
+        font-size: 10px !important;
     }
     #excel-tbody td {
         padding-top: 0.7rem !important;
