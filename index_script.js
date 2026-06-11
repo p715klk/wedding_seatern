@@ -10,28 +10,29 @@ const FINE_COL_UNIT = 220;
 const FINE_ROW_UNIT = 230;
 const FINE_GRID_PAD = 1;
 const FLOOR_COLS = 4;
+const FLOOR_HALF_ROWS = 10; // 每張枱佔 2 半格 → 側邊枱可卡喺兩行中間
 
-// 簽到頁經典卡拉排位（中間 1–10 兩欄，左右 11–14 卡喺行與行之間）
+// 半格排位：rowStart 用 1-based 半格行，rowSpan=2；11/13 由 row 4 起，卡喺 3-4 同 5-6 之間
 const VISUAL_TABLE_SLOTS = {
-    '1': { gridRow: 1, gridCol: 2 },
-    '2': { gridRow: 1, gridCol: 3 },
-    '3': { gridRow: 2, gridCol: 2 },
-    '4': { gridRow: 2, gridCol: 3 },
-    '11': { gridRow: 3, gridCol: 1 },
-    '13': { gridRow: 3, gridCol: 4 },
-    '5': { gridRow: 4, gridCol: 2 },
-    '6': { gridRow: 4, gridCol: 3 },
-    '12': { gridRow: 5, gridCol: 1 },
-    '14': { gridRow: 5, gridCol: 4 },
-    '7': { gridRow: 6, gridCol: 2 },
-    '8': { gridRow: 6, gridCol: 3 },
-    '9': { gridRow: 7, gridCol: 2 },
-    '10': { gridRow: 7, gridCol: 3 }
+    '1': { rowStart: 1, rowSpan: 2, gridCol: 2 },
+    '2': { rowStart: 1, rowSpan: 2, gridCol: 3 },
+    '3': { rowStart: 3, rowSpan: 2, gridCol: 2 },
+    '4': { rowStart: 3, rowSpan: 2, gridCol: 3 },
+    '11': { rowStart: 4, rowSpan: 2, gridCol: 1 },
+    '13': { rowStart: 4, rowSpan: 2, gridCol: 4 },
+    '5': { rowStart: 5, rowSpan: 2, gridCol: 2 },
+    '6': { rowStart: 5, rowSpan: 2, gridCol: 3 },
+    '12': { rowStart: 6, rowSpan: 2, gridCol: 1 },
+    '14': { rowStart: 6, rowSpan: 2, gridCol: 4 },
+    '7': { rowStart: 7, rowSpan: 2, gridCol: 2 },
+    '8': { rowStart: 7, rowSpan: 2, gridCol: 3 },
+    '9': { rowStart: 9, rowSpan: 2, gridCol: 2 },
+    '10': { rowStart: 9, rowSpan: 2, gridCol: 3 }
 };
 
 const EMPTY_TEMPLATE_SLOTS = Object.entries(VISUAL_TABLE_SLOTS)
     .map(([num, slot]) => ({ num, ...slot }))
-    .sort((a, b) => a.gridRow - b.gridRow || a.gridCol - b.gridCol);
+    .sort((a, b) => a.rowStart - b.rowStart || a.gridCol - b.gridCol);
 
 let dbData = {};
 let statusState = {};
@@ -112,11 +113,15 @@ function resolveFineGridCollision(placed) {
     });
 }
 
+function slotKey(slot) {
+    return `${slot.rowStart},${slot.gridCol}`;
+}
+
 // 經典模板 + 額外枱用 seating 座標自動排位
 function computeFloorLayoutFromTableSettings(settings) {
     const normalized = normalizeTableSettings(settings);
     const activeNums = Object.keys(normalized);
-    if (!activeNums.length) return { items: [], numRows: 0, numCols: FLOOR_COLS };
+    if (!activeNums.length) return { items: [], numHalfRows: 0, numCols: FLOOR_COLS };
 
     const items = [];
     const unplaced = [];
@@ -124,16 +129,14 @@ function computeFloorLayoutFromTableSettings(settings) {
     activeNums.forEach(num => {
         const slot = VISUAL_TABLE_SLOTS[num];
         if (slot) {
-            items.push({ num, gridRow: slot.gridRow, gridCol: slot.gridCol });
+            items.push({ num, ...slot });
         } else {
             unplaced.push(num);
         }
     });
 
-    const usedSlots = new Set(items.map(i => `${i.gridRow},${i.gridCol}`));
-    const freeSlots = EMPTY_TEMPLATE_SLOTS.filter(slot =>
-        !usedSlots.has(`${slot.gridRow},${slot.gridCol}`)
-    );
+    const usedSlots = new Set(items.map(i => slotKey(i)));
+    const freeSlots = EMPTY_TEMPLATE_SLOTS.filter(slot => !usedSlots.has(slotKey(slot)));
 
     unplaced.sort((a, b) => Number(a) - Number(b));
     const overflow = [];
@@ -141,8 +144,8 @@ function computeFloorLayoutFromTableSettings(settings) {
     unplaced.forEach(num => {
         const reuse = freeSlots.shift();
         if (reuse) {
-            items.push({ num, gridRow: reuse.gridRow, gridCol: reuse.gridCol });
-            usedSlots.add(`${reuse.gridRow},${reuse.gridCol}`);
+            items.push({ num, rowStart: reuse.rowStart, rowSpan: reuse.rowSpan, gridCol: reuse.gridCol });
+            usedSlots.add(slotKey(reuse));
         } else {
             overflow.push(num);
         }
@@ -152,11 +155,11 @@ function computeFloorLayoutFromTableSettings(settings) {
         items.push(...placeOverflowTables(overflow, normalized, items));
     }
 
-    const numRows = items.length
-        ? Math.max(7, ...items.map(i => i.gridRow))
+    const numHalfRows = items.length
+        ? Math.max(FLOOR_HALF_ROWS, ...items.map(i => i.rowStart + i.rowSpan - 1))
         : 0;
 
-    return { items, numRows, numCols: FLOOR_COLS };
+    return { items, numHalfRows, numCols: FLOOR_COLS };
 }
 
 function placeOverflowTables(nums, normalized, existingItems) {
@@ -179,12 +182,13 @@ function placeOverflowTables(nums, normalized, existingItems) {
 
     resolveFineGridCollision(placed);
 
-    const baseRow = Math.max(7, ...existingItems.map(i => i.gridRow)) + 1;
+    const baseRow = Math.max(FLOOR_HALF_ROWS, ...existingItems.map(i => i.rowStart + i.rowSpan - 1)) + 1;
     const rowMap = compactAxisMap(placed.map(t => t.row));
 
     return placed.map(t => ({
         num: t.num,
-        gridRow: baseRow + rowMap.get(t.row) - 1,
+        rowStart: baseRow + (rowMap.get(t.row) - 1) * 2,
+        rowSpan: 2,
         gridCol: t.col
     }));
 }
@@ -196,14 +200,6 @@ function compactAxisMap(values) {
 }
 
 function syncFloorCellSize() {
-    if (!floorPlanWrap) return;
-    const gapPx = 12;
-    const wrapW = floorPlanWrap.clientWidth || 544;
-    const cellW = Math.floor((wrapW - gapPx * (FLOOR_COLS - 1)) / FLOOR_COLS);
-    floorPlan.style.setProperty('--floor-cell', `${Math.max(cellW, 72)}px`);
-    floorPlan.classList.add('floor-plan-fit');
-    floorPlan.style.gridTemplateColumns = `repeat(${FLOOR_COLS}, minmax(0, 1fr))`;
-    floorPlan.dataset.cols = String(FLOOR_COLS);
     if (floorPlanHint) floorPlanHint.classList.add('hidden');
 }
 
@@ -220,18 +216,18 @@ function createTableCard(num) {
 }
 
 function renderFloorPlan(layout) {
-    const { items = [], numRows = 0 } = layout || {};
+    const { items = [], numHalfRows = 0 } = layout || {};
 
     syncFloorCellSize();
     floorPlan.innerHTML = '';
 
     if (!items.length) return;
 
-    floorPlan.style.gridTemplateRows = `repeat(${numRows}, 6rem)`;
+    floorPlan.style.gridTemplateRows = `repeat(${numHalfRows}, 3rem)`;
 
-    items.forEach(({ num, gridRow, gridCol }) => {
+    items.forEach(({ num, rowStart, rowSpan, gridCol }) => {
         const div = createTableCard(num);
-        div.style.gridRow = String(gridRow);
+        div.style.gridRow = `${rowStart} / span ${rowSpan}`;
         div.style.gridColumn = String(gridCol);
         floorPlan.appendChild(div);
     });
@@ -239,7 +235,7 @@ function renderFloorPlan(layout) {
 
 window.addEventListener('resize', syncFloorCellSize);
 
-renderFloorPlan({ items: [], numRows: 0, numCols: 0 });
+renderFloorPlan({ items: [], numHalfRows: 0, numCols: 0 });
 
 // Firebase 即時監聽 — 排位跟 table_settings 動態更新
 database.ref().on('value', (snapshot) => {

@@ -622,27 +622,32 @@ const FINE_COL_UNIT = 220;
 const FINE_ROW_UNIT = 230;
 const FINE_GRID_PAD = 1;
 const FLOOR_COLS = 4;
+const FLOOR_HALF_ROWS = 10;
 
 const VISUAL_TABLE_SLOTS = {
-    '1': { gridRow: 1, gridCol: 2 },
-    '2': { gridRow: 1, gridCol: 3 },
-    '3': { gridRow: 2, gridCol: 2 },
-    '4': { gridRow: 2, gridCol: 3 },
-    '11': { gridRow: 3, gridCol: 1 },
-    '13': { gridRow: 3, gridCol: 4 },
-    '5': { gridRow: 4, gridCol: 2 },
-    '6': { gridRow: 4, gridCol: 3 },
-    '12': { gridRow: 5, gridCol: 1 },
-    '14': { gridRow: 5, gridCol: 4 },
-    '7': { gridRow: 6, gridCol: 2 },
-    '8': { gridRow: 6, gridCol: 3 },
-    '9': { gridRow: 7, gridCol: 2 },
-    '10': { gridRow: 7, gridCol: 3 }
+    '1': { rowStart: 1, rowSpan: 2, gridCol: 2 },
+    '2': { rowStart: 1, rowSpan: 2, gridCol: 3 },
+    '3': { rowStart: 3, rowSpan: 2, gridCol: 2 },
+    '4': { rowStart: 3, rowSpan: 2, gridCol: 3 },
+    '11': { rowStart: 4, rowSpan: 2, gridCol: 1 },
+    '13': { rowStart: 4, rowSpan: 2, gridCol: 4 },
+    '5': { rowStart: 5, rowSpan: 2, gridCol: 2 },
+    '6': { rowStart: 5, rowSpan: 2, gridCol: 3 },
+    '12': { rowStart: 6, rowSpan: 2, gridCol: 1 },
+    '14': { rowStart: 6, rowSpan: 2, gridCol: 4 },
+    '7': { rowStart: 7, rowSpan: 2, gridCol: 2 },
+    '8': { rowStart: 7, rowSpan: 2, gridCol: 3 },
+    '9': { rowStart: 9, rowSpan: 2, gridCol: 2 },
+    '10': { rowStart: 9, rowSpan: 2, gridCol: 3 }
 };
 
 const EMPTY_TEMPLATE_SLOTS = Object.entries(VISUAL_TABLE_SLOTS)
     .map(([num, slot]) => ({ num, ...slot }))
-    .sort((a, b) => a.gridRow - b.gridRow || a.gridCol - b.gridCol);
+    .sort((a, b) => a.rowStart - b.rowStart || a.gridCol - b.gridCol);
+
+function slotKey(slot) {
+    return `${slot.rowStart},${slot.gridCol}`;
+}
 
 function resolveFineGridCollision(placed) {
     const occupied = new Map();
@@ -697,12 +702,13 @@ function placeOverflowTables(nums, normalized, existingItems) {
 
     resolveFineGridCollision(placed);
 
-    const baseRow = Math.max(7, ...existingItems.map(i => i.gridRow)) + 1;
+    const baseRow = Math.max(FLOOR_HALF_ROWS, ...existingItems.map(i => i.rowStart + i.rowSpan - 1)) + 1;
     const rowMap = compactAxisMap(placed.map(t => t.row));
 
     return placed.map(t => ({
         num: t.num,
-        gridRow: baseRow + rowMap.get(t.row) - 1,
+        rowStart: baseRow + (rowMap.get(t.row) - 1) * 2,
+        rowSpan: 2,
         gridCol: t.col
     }));
 }
@@ -710,7 +716,7 @@ function placeOverflowTables(nums, normalized, existingItems) {
 function computeFloorLayoutFromTableSettings(settings) {
     const normalized = normalizeTableSettings(settings);
     const activeNums = Object.keys(normalized);
-    if (!activeNums.length) return { items: [], numRows: 0, numCols: FLOOR_COLS };
+    if (!activeNums.length) return { items: [], numHalfRows: 0, numCols: FLOOR_COLS };
 
     const items = [];
     const unplaced = [];
@@ -718,16 +724,14 @@ function computeFloorLayoutFromTableSettings(settings) {
     activeNums.forEach(num => {
         const slot = VISUAL_TABLE_SLOTS[num];
         if (slot) {
-            items.push({ num, gridRow: slot.gridRow, gridCol: slot.gridCol });
+            items.push({ num, ...slot });
         } else {
             unplaced.push(num);
         }
     });
 
-    const usedSlots = new Set(items.map(i => `${i.gridRow},${i.gridCol}`));
-    const freeSlots = EMPTY_TEMPLATE_SLOTS.filter(slot =>
-        !usedSlots.has(`${slot.gridRow},${slot.gridCol}`)
-    );
+    const usedSlots = new Set(items.map(i => slotKey(i)));
+    const freeSlots = EMPTY_TEMPLATE_SLOTS.filter(slot => !usedSlots.has(slotKey(slot)));
 
     unplaced.sort((a, b) => Number(a) - Number(b));
     const overflow = [];
@@ -735,8 +739,8 @@ function computeFloorLayoutFromTableSettings(settings) {
     unplaced.forEach(num => {
         const reuse = freeSlots.shift();
         if (reuse) {
-            items.push({ num, gridRow: reuse.gridRow, gridCol: reuse.gridCol });
-            usedSlots.add(`${reuse.gridRow},${reuse.gridCol}`);
+            items.push({ num, rowStart: reuse.rowStart, rowSpan: reuse.rowSpan, gridCol: reuse.gridCol });
+            usedSlots.add(slotKey(reuse));
         } else {
             overflow.push(num);
         }
@@ -746,11 +750,11 @@ function computeFloorLayoutFromTableSettings(settings) {
         items.push(...placeOverflowTables(overflow, normalized, items));
     }
 
-    const numRows = items.length
-        ? Math.max(7, ...items.map(i => i.gridRow))
+    const numHalfRows = items.length
+        ? Math.max(FLOOR_HALF_ROWS, ...items.map(i => i.rowStart + i.rowSpan - 1))
         : 0;
 
-    return { items, numRows, numCols: FLOOR_COLS };
+    return { items, numHalfRows, numCols: FLOOR_COLS };
 }
 
 function buildSignInFloorLayout(settings) {
@@ -765,11 +769,12 @@ function normalizeFloorLayout(layout) {
         return {
             items: layout.items.map(item => ({
                 num: String(item.num),
-                gridRow: Number(item.gridRow),
+                rowStart: Number(item.rowStart ?? item.gridRow),
+                rowSpan: Number(item.rowSpan) || 2,
                 gridCol: Number(item.gridCol)
             })),
-            numRows: Number(layout.numRows) || 0,
-            numCols: Number(layout.numCols) || 0
+            numHalfRows: Number(layout.numHalfRows ?? layout.numRows) || 0,
+            numCols: Number(layout.numCols) || FLOOR_COLS
         };
     }
     if (layout.cols != null && Array.isArray(layout.rows)) {
