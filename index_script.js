@@ -6,33 +6,9 @@ firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
 const TABLE_PLATE_CENTER = 210;
-const FINE_COL_UNIT = 220;
-const FINE_ROW_UNIT = 230;
-const FINE_GRID_PAD = 1;
 const FLOOR_COLS = 4;
-const FLOOR_HALF_ROWS = 10; // 每張枱佔 2 半格 → 側邊枱可卡喺兩行中間
-
-// 半格排位：rowStart 用 1-based 半格行，rowSpan=2；11/13 由 row 4 起，卡喺 3-4 同 5-6 之間
-const VISUAL_TABLE_SLOTS = {
-    '1': { rowStart: 1, rowSpan: 2, gridCol: 2 },
-    '2': { rowStart: 1, rowSpan: 2, gridCol: 3 },
-    '3': { rowStart: 3, rowSpan: 2, gridCol: 2 },
-    '4': { rowStart: 3, rowSpan: 2, gridCol: 3 },
-    '11': { rowStart: 4, rowSpan: 2, gridCol: 1 },
-    '13': { rowStart: 4, rowSpan: 2, gridCol: 4 },
-    '5': { rowStart: 5, rowSpan: 2, gridCol: 2 },
-    '6': { rowStart: 5, rowSpan: 2, gridCol: 3 },
-    '12': { rowStart: 6, rowSpan: 2, gridCol: 1 },
-    '14': { rowStart: 6, rowSpan: 2, gridCol: 4 },
-    '7': { rowStart: 7, rowSpan: 2, gridCol: 2 },
-    '8': { rowStart: 7, rowSpan: 2, gridCol: 3 },
-    '9': { rowStart: 9, rowSpan: 2, gridCol: 2 },
-    '10': { rowStart: 9, rowSpan: 2, gridCol: 3 }
-};
-
-const EMPTY_TEMPLATE_SLOTS = Object.entries(VISUAL_TABLE_SLOTS)
-    .map(([num, slot]) => ({ num, ...slot }))
-    .sort((a, b) => a.rowStart - b.rowStart || a.gridCol - b.gridCol);
+const SEATING_ROW_Y_THRESHOLD = 240;
+const SEATING_COL_GAP = 440;
 
 let dbData = {};
 let statusState = {};
@@ -86,117 +62,137 @@ function normalizeTableSettings(raw) {
     return normalized;
 }
 
-function resolveFineGridCollision(placed) {
-    const occupied = new Map();
-    placed.sort((a, b) => a.row - b.row || a.col - b.col || Number(a.num) - Number(b.num));
+function groupTablesByY(tables, threshold = SEATING_ROW_Y_THRESHOLD) {
+    const sorted = [...tables].sort((a, b) => a.cy - b.cy || a.cx - b.cx);
+    const groups = [];
+    let bucket = [];
+    let centerY = null;
 
-    placed.forEach(t => {
-        let { col, row } = t;
-        while (occupied.has(`${row},${col}`)) {
-            const tryDirs = [[0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [1, -1]];
-            let moved = false;
-            for (const [dr, dc] of tryDirs) {
-                const nr = t.row + dr;
-                const nc = t.col + dc;
-                if (!occupied.has(`${nr},${nc}`)) {
-                    row = nr;
-                    col = nc;
-                    moved = true;
-                    break;
-                }
-            }
-            if (!moved) col++;
+    sorted.forEach(t => {
+        if (centerY === null || Math.abs(t.cy - centerY) > threshold) {
+            if (bucket.length) groups.push(bucket);
+            bucket = [t];
+            centerY = t.cy;
+        } else {
+            bucket.push(t);
+            centerY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
         }
-        t.row = row;
-        t.col = col;
-        occupied.set(`${row},${col}`, t.num);
     });
+    if (bucket.length) groups.push(bucket);
+    return groups;
 }
 
-function slotKey(slot) {
-    return `${slot.rowStart},${slot.gridCol}`;
+function classifyWingCol(cx, allCx) {
+    const minX = Math.min(...allCx);
+    const maxX = Math.max(...allCx);
+    const midX = (minX + maxX) / 2;
+    return cx < midX ? 1 : 4;
 }
 
-// 經典模板 + 額外枱用 seating 座標自動排位
+function isWingTable(cx, allCx) {
+    const minX = Math.min(...allCx);
+    const maxX = Math.max(...allCx);
+    const span = Math.max(maxX - minX, SEATING_COL_GAP);
+    const rel = (cx - minX) / span;
+    return rel < 0.24 || rel > 0.76;
+}
+
+function bandCenterY(band) {
+    return band.reduce((sum, t) => sum + t.cy, 0) / band.length;
+}
+
+// 全部枱統一：中間 cols 2–3 成行，左右 cols 1/4 卡拉喺行與行之間（枱數不限）
 function computeFloorLayoutFromTableSettings(settings) {
     const normalized = normalizeTableSettings(settings);
-    const activeNums = Object.keys(normalized);
-    if (!activeNums.length) return { items: [], numHalfRows: 0, numCols: FLOOR_COLS };
+    const nums = Object.keys(normalized);
+    if (!nums.length) return { items: [], numHalfRows: 0, numCols: FLOOR_COLS };
 
-    const items = [];
-    const unplaced = [];
-
-    activeNums.forEach(num => {
-        const slot = VISUAL_TABLE_SLOTS[num];
-        if (slot) {
-            items.push({ num, ...slot });
-        } else {
-            unplaced.push(num);
-        }
-    });
-
-    const usedSlots = new Set(items.map(i => slotKey(i)));
-    const freeSlots = EMPTY_TEMPLATE_SLOTS.filter(slot => !usedSlots.has(slotKey(slot)));
-
-    unplaced.sort((a, b) => Number(a) - Number(b));
-    const overflow = [];
-
-    unplaced.forEach(num => {
-        const reuse = freeSlots.shift();
-        if (reuse) {
-            items.push({ num, rowStart: reuse.rowStart, rowSpan: reuse.rowSpan, gridCol: reuse.gridCol });
-            usedSlots.add(slotKey(reuse));
-        } else {
-            overflow.push(num);
-        }
-    });
-
-    if (overflow.length) {
-        items.push(...placeOverflowTables(overflow, normalized, items));
-    }
-
-    const numHalfRows = items.length
-        ? Math.max(FLOOR_HALF_ROWS, ...items.map(i => i.rowStart + i.rowSpan - 1))
-        : 0;
-
-    return { items, numHalfRows, numCols: FLOOR_COLS };
-}
-
-function placeOverflowTables(nums, normalized, existingItems) {
     const tables = nums.map(num => ({
         num: String(num),
         cx: normalized[num].x + TABLE_PLATE_CENTER,
         cy: normalized[num].y + TABLE_PLATE_CENTER
     }));
+    const allCx = tables.map(t => t.cx);
 
-    const minCx = Math.min(...tables.map(t => t.cx));
-    const minCy = Math.min(...tables.map(t => t.cy));
-    const anchorX = minCx - FINE_COL_UNIT;
-    const anchorY = minCy - FINE_ROW_UNIT;
+    const center = [];
+    const wings = [];
 
-    const placed = tables.map(t => ({
-        num: t.num,
-        col: Math.min(FLOOR_COLS, Math.max(1, Math.round((t.cx - anchorX) / FINE_COL_UNIT))),
-        row: Math.round((t.cy - anchorY) / FINE_ROW_UNIT)
-    }));
+    tables.forEach(t => {
+        if (isWingTable(t.cx, allCx)) {
+            wings.push({ ...t, gridCol: classifyWingCol(t.cx, allCx) });
+        } else {
+            center.push(t);
+        }
+    });
 
-    resolveFineGridCollision(placed);
+    const centerBands = groupTablesByY(center);
+    const items = [];
+    const occupied = new Set();
 
-    const baseRow = Math.max(FLOOR_HALF_ROWS, ...existingItems.map(i => i.rowStart + i.rowSpan - 1)) + 1;
-    const rowMap = compactAxisMap(placed.map(t => t.row));
+    function tryPlace(rowStart, gridCol, num) {
+        const key = `${rowStart},${gridCol}`;
+        if (occupied.has(key)) return false;
+        occupied.add(key);
+        items.push({ num, rowStart, rowSpan: 2, gridCol });
+        return true;
+    }
 
-    return placed.map(t => ({
-        num: t.num,
-        rowStart: baseRow + (rowMap.get(t.row) - 1) * 2,
-        rowSpan: 2,
-        gridCol: t.col
-    }));
-}
+    centerBands.forEach((band, i) => {
+        const rowStart = 1 + i * 2;
+        band.sort((a, b) => a.cx - b.cx);
+        band.forEach((t, idx) => {
+            const gridCol = band.length === 1
+                ? (t.cx < (Math.min(...allCx) + Math.max(...allCx)) / 2 ? 2 : 3)
+                : (idx === 0 ? 2 : 3);
+            if (!tryPlace(rowStart, gridCol, t.num)) {
+                tryPlace(rowStart, gridCol === 2 ? 3 : 2, t.num)
+                    || tryPlace(rowStart + 2, gridCol, t.num);
+            }
+        });
+    });
 
-function compactAxisMap(values) {
-    const map = new Map();
-    [...new Set(values)].sort((a, b) => a - b).forEach((v, i) => map.set(v, i + 1));
-    return map;
+    const staggerSlots = [];
+    for (let i = 0; i < centerBands.length - 1; i++) {
+        const rsA = 1 + i * 2;
+        const rsB = 1 + (i + 1) * 2;
+        staggerSlots.push({
+            rowStart: Math.floor((rsA + rsB) / 2),
+            cy: (bandCenterY(centerBands[i]) + bandCenterY(centerBands[i + 1])) / 2
+        });
+    }
+    if (centerBands.length) {
+        const lastRowStart = 1 + (centerBands.length - 1) * 2;
+        staggerSlots.push({
+            rowStart: lastRowStart + 1,
+            cy: bandCenterY(centerBands[centerBands.length - 1]) + SEATING_ROW_Y_THRESHOLD
+        });
+    }
+    if (!staggerSlots.length) {
+        staggerSlots.push({ rowStart: 4, cy: tables[0]?.cy || 0 });
+    }
+
+    function assignWingsSide(wingTables) {
+        wingTables.sort((a, b) => a.cy - b.cy || Number(a.num) - Number(b.num));
+        wingTables.forEach(t => {
+            const ranked = [...staggerSlots].sort(
+                (a, b) => Math.abs(t.cy - a.cy) - Math.abs(t.cy - b.cy)
+            );
+            for (const slot of ranked) {
+                if (tryPlace(slot.rowStart, t.gridCol, t.num)) return;
+            }
+            let row = (staggerSlots[staggerSlots.length - 1]?.rowStart || 4) + 2;
+            while (!tryPlace(row, t.gridCol, t.num)) row += 2;
+        });
+    }
+
+    assignWingsSide(wings.filter(t => t.gridCol === 1));
+    assignWingsSide(wings.filter(t => t.gridCol === 4));
+
+    const numHalfRows = items.length
+        ? Math.max(...items.map(i => i.rowStart + i.rowSpan - 1))
+        : 0;
+
+    return { items, numHalfRows, numCols: FLOOR_COLS };
 }
 
 function syncFloorCellSize() {
