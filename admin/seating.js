@@ -576,71 +576,23 @@ function zoomCanvas(factor) {
     );
 }
 
-const FLOOR_GRID_COLS = 4;
-const FLOOR_ROW_Y_THRESHOLD = 250;
+// 簽到頁固定格子排位（畫布拖枱唔會改呢個模板，只會按現有枱號過濾）
+const SIGNIN_FLOOR_LAYOUT = [
+    ['.', '1', '2', '.'],
+    ['.', '3', '4', '.'],
+    ['11', '5', '6', '13'],
+    ['12', '7', '8', '14'],
+    ['.', '9', '10', '.']
+];
 
-function computeFloorLayoutFromTableSettings(settings) {
-    const nums = Object.keys(settings || {}).filter(n => settings[n] && settings[n].x != null && settings[n].y != null);
-    if (!nums.length) return null;
-
-    const tables = nums.map(num => ({
-        num: String(num),
-        cx: settings[num].x + PLATE_CENTER,
-        cy: settings[num].y + PLATE_CENTER
-    }));
-
-    tables.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
-
-    const rows = [];
-    let bucket = [];
-    let rowCenterY = null;
-
-    tables.forEach(t => {
-        if (rowCenterY === null || Math.abs(t.cy - rowCenterY) > FLOOR_ROW_Y_THRESHOLD) {
-            if (bucket.length) rows.push(bucket);
-            bucket = [t];
-            rowCenterY = t.cy;
-        } else {
-            bucket.push(t);
-            rowCenterY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
-        }
-    });
-    if (bucket.length) rows.push(bucket);
-
-    const allCx = tables.map(t => t.cx);
-    const globalMinX = Math.min(...allCx);
-    const globalMaxX = Math.max(...allCx);
-
-    function assignColumn(cx, rowMinX, rowMaxX) {
-        const rowSpan = rowMaxX - rowMinX;
-        const useMin = rowSpan > 80 ? rowMinX : globalMinX;
-        const useMax = rowSpan > 80 ? rowMaxX : globalMaxX;
-        const useSpan = Math.max(useMax - useMin, 1);
-        const ratio = (cx - useMin) / useSpan;
-        return Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.round(ratio * (FLOOR_GRID_COLS - 1))));
-    }
-
-    function resolveColumn(row, preferredCol) {
-        if (row[preferredCol] === '.') return preferredCol;
-        for (let d = 1; d < FLOOR_GRID_COLS; d++) {
-            if (preferredCol - d >= 0 && row[preferredCol - d] === '.') return preferredCol - d;
-            if (preferredCol + d < FLOOR_GRID_COLS && row[preferredCol + d] === '.') return preferredCol + d;
-        }
-        return preferredCol;
-    }
-
-    return rows.map(rowTables => {
-        const row = ['.', '.', '.', '.'];
-        rowTables.sort((a, b) => a.cx - b.cx);
-        const rowMinX = Math.min(...rowTables.map(t => t.cx));
-        const rowMaxX = Math.max(...rowTables.map(t => t.cx));
-
-        rowTables.forEach(t => {
-            const col = resolveColumn(row, assignColumn(t.cx, rowMinX, rowMaxX));
-            if (row[col] === '.') row[col] = t.num;
-        });
-        return row;
-    });
+function buildSignInFloorLayout(settings) {
+    const existing = new Set(Object.keys(normalizeTableSettings(settings)));
+    return SIGNIN_FLOOR_LAYOUT.map(row =>
+        row.map(cell => {
+            if (cell === '.') return '.';
+            return existing.has(cell) ? cell : '.';
+        })
+    );
 }
 
 let lastPersistedFloorLayoutJson = null;
@@ -662,7 +614,7 @@ function normalizeFloorLayout(layout) {
 }
 
 function syncFloorLayoutIfNeeded(existingLayout) {
-    const computed = computeFloorLayoutFromTableSettings(tableSettings);
+    const computed = buildSignInFloorLayout(tableSettings);
     if (!computed) return Promise.resolve();
 
     const normalizedExisting = normalizeFloorLayout(existingLayout);
@@ -681,7 +633,7 @@ function syncFloorLayoutIfNeeded(existingLayout) {
     });
 }
 
-function scheduleFloorLayoutSync(existingLayout) {
+function scheduleFloorLayoutSync(existingLayout = null) {
     syncFloorLayoutIfNeeded(existingLayout);
 }
 
@@ -1716,9 +1668,13 @@ function bootstrapSeatingView() {
     });
 }
 
-// Firebase 實時同步
-database.ref().on('value', (snapshot) => {
-    const root = snapshot.val() || {};
+function setGlobalStatsMessage(message) {
+    const stats = document.getElementById('global-stats');
+    if (stats) stats.innerText = message;
+}
+
+function handleSeatingDataRoot(root) {
+    root = root || {};
     allGuests = root.wedding_guests || [];
     unassignedPool = root.unassigned_guests || [];
     tableSettings = normalizeTableSettings(root.table_settings);
@@ -1748,7 +1704,7 @@ database.ref().on('value', (snapshot) => {
             console.warn('table_settings 初始化失敗:', err);
         });
         bootstrapSeatingView();
-        scheduleFloorLayoutSync(root.floor_layout);
+        scheduleFloorLayoutSync();
         return;
     }
 
@@ -1758,13 +1714,63 @@ database.ref().on('value', (snapshot) => {
             .finally(() => {
                 localStorage.setItem('seating_grid_snap_v1', '1');
                 bootstrapSeatingView();
-                scheduleFloorLayoutSync(root.floor_layout);
+                scheduleFloorLayoutSync();
             });
         return;
     }
 
     bootstrapSeatingView();
-    scheduleFloorLayoutSync(root.floor_layout);
+    scheduleFloorLayoutSync();
+}
+
+// Firebase 實時同步（分拆監聽，避免一次下載成個 DB 太慢）
+let seatingDataReady = { guests: false, pool: false, tables: false, meta: false };
+
+function maybeBootstrapFromPartialSync() {
+    if (!seatingDataReady.tables) return;
+    bootstrapSeatingView();
+}
+
+function markSeatingPartialReady(key) {
+    seatingDataReady[key] = true;
+    maybeBootstrapFromPartialSync();
+}
+
+setGlobalStatsMessage('連線中...');
+
+database.ref('wedding_guests').on('value', (snapshot) => {
+    allGuests = snapshot.val() || [];
+    markSeatingPartialReady('guests');
+    runRender();
+}, err => {
+    console.error('wedding_guests 讀取失敗:', err);
+    setGlobalStatsMessage('賓客資料讀取失敗');
+});
+
+database.ref('unassigned_guests').on('value', (snapshot) => {
+    unassignedPool = snapshot.val() || [];
+    markSeatingPartialReady('pool');
+    runRender();
+}, err => console.error('unassigned_guests 讀取失敗:', err));
+
+database.ref('meta_label_columns').on('value', (snapshot) => {
+    applyMetaLabelColumns(snapshot.val());
+    markSeatingPartialReady('meta');
+}, err => console.error('meta_label_columns 讀取失敗:', err));
+
+database.ref('table_settings').on('value', (snapshot) => {
+    const root = {
+        wedding_guests: allGuests,
+        unassigned_guests: unassignedPool,
+        table_settings: snapshot.val(),
+        meta_label_columns: null,
+        floor_layout: null
+    };
+    handleSeatingDataRoot(root);
+    markSeatingPartialReady('tables');
+}, err => {
+    console.error('table_settings 讀取失敗:', err);
+    setGlobalStatsMessage('枱位資料讀取失敗');
 });
 
 window.addEventListener('resize', () => {
@@ -1799,7 +1805,8 @@ function updateGlobalStats() {
 function collectPoolBySide(side) {
     const groups = {};
     let count = 0;
-    unassignedPool.forEach((guest, index) => {
+    const pool = Array.isArray(unassignedPool) ? unassignedPool : [];
+    pool.forEach((guest, index) => {
         if (!guest || !guest.name) return;
         const isMatch = side === '男方' ? guest.side === '男方' : guest.side !== '男方';
         if (!isMatch) return;

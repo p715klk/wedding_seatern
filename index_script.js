@@ -46,6 +46,11 @@ function guestMatchesKeyword(guest, keyword) {
     return name.includes(keyword) || side.includes(keyword) || tags.some(t => t.toLowerCase().includes(keyword));
 }
 
+function isValidFloorLayout(layout) {
+    if (!Array.isArray(layout) || !layout.length) return false;
+    return layout.every(row => Array.isArray(row) && row.length === 4);
+}
+
 function renderFloorPlan(layout) {
     const grid = Array.isArray(layout) && layout.length ? layout : DEFAULT_FLOOR_LAYOUT;
     floorPlan.innerHTML = '';
@@ -76,7 +81,7 @@ database.ref().on('value', (snapshot) => {
     dbData = root.wedding_guests || {};
     statusState = root.guest_status || {};
 
-    const layout = root.floor_layout || DEFAULT_FLOOR_LAYOUT;
+    const layout = isValidFloorLayout(root.floor_layout) ? root.floor_layout : DEFAULT_FLOOR_LAYOUT;
     const layoutJson = JSON.stringify(layout);
     if (layoutJson !== currentFloorLayoutJson) {
         currentFloorLayoutJson = layoutJson;
