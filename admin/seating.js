@@ -621,6 +621,28 @@ function zoomCanvas(factor) {
 const FINE_COL_UNIT = 220;
 const FINE_ROW_UNIT = 230;
 const FINE_GRID_PAD = 1;
+const FLOOR_COLS = 4;
+
+const VISUAL_TABLE_SLOTS = {
+    '1': { gridRow: 1, gridCol: 2 },
+    '2': { gridRow: 1, gridCol: 3 },
+    '3': { gridRow: 2, gridCol: 2 },
+    '4': { gridRow: 2, gridCol: 3 },
+    '11': { gridRow: 3, gridCol: 1 },
+    '13': { gridRow: 3, gridCol: 4 },
+    '5': { gridRow: 4, gridCol: 2 },
+    '6': { gridRow: 4, gridCol: 3 },
+    '12': { gridRow: 5, gridCol: 1 },
+    '14': { gridRow: 5, gridCol: 4 },
+    '7': { gridRow: 6, gridCol: 2 },
+    '8': { gridRow: 6, gridCol: 3 },
+    '9': { gridRow: 7, gridCol: 2 },
+    '10': { gridRow: 7, gridCol: 3 }
+};
+
+const EMPTY_TEMPLATE_SLOTS = Object.entries(VISUAL_TABLE_SLOTS)
+    .map(([num, slot]) => ({ num, ...slot }))
+    .sort((a, b) => a.gridRow - b.gridRow || a.gridCol - b.gridCol);
 
 function resolveFineGridCollision(placed) {
     const occupied = new Map();
@@ -655,27 +677,7 @@ function compactAxisMap(values) {
     return map;
 }
 
-function compactFloorPlacement(placed) {
-    if (!placed.length) return { items: [], numRows: 0, numCols: 0 };
-
-    const rowMap = compactAxisMap(placed.map(t => t.row));
-    const colMap = compactAxisMap(placed.map(t => t.col));
-
-    const items = placed.map(t => ({
-        num: t.num,
-        gridRow: rowMap.get(t.row),
-        gridCol: colMap.get(t.col)
-    }));
-
-    return { items, numRows: rowMap.size, numCols: colMap.size };
-}
-
-// 依 seating 畫布 x/y 量化 — 稀疏排位（枱可卡喺兩枱之間）
-function computeFloorLayoutFromTableSettings(settings) {
-    const normalized = normalizeTableSettings(settings);
-    const nums = Object.keys(normalized);
-    if (!nums.length) return { items: [], numRows: 0, numCols: 0 };
-
+function placeOverflowTables(nums, normalized, existingItems) {
     const tables = nums.map(num => ({
         num: String(num),
         cx: normalized[num].x + PLATE_CENTER,
@@ -684,17 +686,71 @@ function computeFloorLayoutFromTableSettings(settings) {
 
     const minCx = Math.min(...tables.map(t => t.cx));
     const minCy = Math.min(...tables.map(t => t.cy));
-    const anchorX = minCx - FINE_COL_UNIT * FINE_GRID_PAD;
-    const anchorY = minCy - FINE_ROW_UNIT * FINE_GRID_PAD;
+    const anchorX = minCx - FINE_COL_UNIT;
+    const anchorY = minCy - FINE_ROW_UNIT;
 
     const placed = tables.map(t => ({
         num: t.num,
-        col: Math.round((t.cx - anchorX) / FINE_COL_UNIT),
+        col: Math.min(FLOOR_COLS, Math.max(1, Math.round((t.cx - anchorX) / FINE_COL_UNIT))),
         row: Math.round((t.cy - anchorY) / FINE_ROW_UNIT)
     }));
 
     resolveFineGridCollision(placed);
-    return compactFloorPlacement(placed);
+
+    const baseRow = Math.max(7, ...existingItems.map(i => i.gridRow)) + 1;
+    const rowMap = compactAxisMap(placed.map(t => t.row));
+
+    return placed.map(t => ({
+        num: t.num,
+        gridRow: baseRow + rowMap.get(t.row) - 1,
+        gridCol: t.col
+    }));
+}
+
+function computeFloorLayoutFromTableSettings(settings) {
+    const normalized = normalizeTableSettings(settings);
+    const activeNums = Object.keys(normalized);
+    if (!activeNums.length) return { items: [], numRows: 0, numCols: FLOOR_COLS };
+
+    const items = [];
+    const unplaced = [];
+
+    activeNums.forEach(num => {
+        const slot = VISUAL_TABLE_SLOTS[num];
+        if (slot) {
+            items.push({ num, gridRow: slot.gridRow, gridCol: slot.gridCol });
+        } else {
+            unplaced.push(num);
+        }
+    });
+
+    const usedSlots = new Set(items.map(i => `${i.gridRow},${i.gridCol}`));
+    const freeSlots = EMPTY_TEMPLATE_SLOTS.filter(slot =>
+        !usedSlots.has(`${slot.gridRow},${slot.gridCol}`)
+    );
+
+    unplaced.sort((a, b) => Number(a) - Number(b));
+    const overflow = [];
+
+    unplaced.forEach(num => {
+        const reuse = freeSlots.shift();
+        if (reuse) {
+            items.push({ num, gridRow: reuse.gridRow, gridCol: reuse.gridCol });
+            usedSlots.add(`${reuse.gridRow},${reuse.gridCol}`);
+        } else {
+            overflow.push(num);
+        }
+    });
+
+    if (overflow.length) {
+        items.push(...placeOverflowTables(overflow, normalized, items));
+    }
+
+    const numRows = items.length
+        ? Math.max(7, ...items.map(i => i.gridRow))
+        : 0;
+
+    return { items, numRows, numCols: FLOOR_COLS };
 }
 
 function buildSignInFloorLayout(settings) {

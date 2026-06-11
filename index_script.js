@@ -6,11 +6,32 @@ firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
 const TABLE_PLATE_CENTER = 210;
-// seating 畫布 colGap=440、rowGap=460，簽到頁用一半粒度（2× 解像度）
 const FINE_COL_UNIT = 220;
 const FINE_ROW_UNIT = 230;
 const FINE_GRID_PAD = 1;
-const FLOOR_BASE_COLS = 4;
+const FLOOR_COLS = 4;
+
+// 簽到頁經典卡拉排位（中間 1–10 兩欄，左右 11–14 卡喺行與行之間）
+const VISUAL_TABLE_SLOTS = {
+    '1': { gridRow: 1, gridCol: 2 },
+    '2': { gridRow: 1, gridCol: 3 },
+    '3': { gridRow: 2, gridCol: 2 },
+    '4': { gridRow: 2, gridCol: 3 },
+    '11': { gridRow: 3, gridCol: 1 },
+    '13': { gridRow: 3, gridCol: 4 },
+    '5': { gridRow: 4, gridCol: 2 },
+    '6': { gridRow: 4, gridCol: 3 },
+    '12': { gridRow: 5, gridCol: 1 },
+    '14': { gridRow: 5, gridCol: 4 },
+    '7': { gridRow: 6, gridCol: 2 },
+    '8': { gridRow: 6, gridCol: 3 },
+    '9': { gridRow: 7, gridCol: 2 },
+    '10': { gridRow: 7, gridCol: 3 }
+};
+
+const EMPTY_TEMPLATE_SLOTS = Object.entries(VISUAL_TABLE_SLOTS)
+    .map(([num, slot]) => ({ num, ...slot }))
+    .sort((a, b) => a.gridRow - b.gridRow || a.gridCol - b.gridCol);
 
 let dbData = {};
 let statusState = {};
@@ -91,12 +112,54 @@ function resolveFineGridCollision(placed) {
     });
 }
 
-// 依 seating x/y 量化 — 只記錄每張枱嘅格位（唔產生空白格）
+// 經典模板 + 額外枱用 seating 座標自動排位
 function computeFloorLayoutFromTableSettings(settings) {
     const normalized = normalizeTableSettings(settings);
-    const nums = Object.keys(normalized);
-    if (!nums.length) return { items: [], numRows: 0, numCols: 0 };
+    const activeNums = Object.keys(normalized);
+    if (!activeNums.length) return { items: [], numRows: 0, numCols: FLOOR_COLS };
 
+    const items = [];
+    const unplaced = [];
+
+    activeNums.forEach(num => {
+        const slot = VISUAL_TABLE_SLOTS[num];
+        if (slot) {
+            items.push({ num, gridRow: slot.gridRow, gridCol: slot.gridCol });
+        } else {
+            unplaced.push(num);
+        }
+    });
+
+    const usedSlots = new Set(items.map(i => `${i.gridRow},${i.gridCol}`));
+    const freeSlots = EMPTY_TEMPLATE_SLOTS.filter(slot =>
+        !usedSlots.has(`${slot.gridRow},${slot.gridCol}`)
+    );
+
+    unplaced.sort((a, b) => Number(a) - Number(b));
+    const overflow = [];
+
+    unplaced.forEach(num => {
+        const reuse = freeSlots.shift();
+        if (reuse) {
+            items.push({ num, gridRow: reuse.gridRow, gridCol: reuse.gridCol });
+            usedSlots.add(`${reuse.gridRow},${reuse.gridCol}`);
+        } else {
+            overflow.push(num);
+        }
+    });
+
+    if (overflow.length) {
+        items.push(...placeOverflowTables(overflow, normalized, items));
+    }
+
+    const numRows = items.length
+        ? Math.max(7, ...items.map(i => i.gridRow))
+        : 0;
+
+    return { items, numRows, numCols: FLOOR_COLS };
+}
+
+function placeOverflowTables(nums, normalized, existingItems) {
     const tables = nums.map(num => ({
         num: String(num),
         cx: normalized[num].x + TABLE_PLATE_CENTER,
@@ -105,17 +168,25 @@ function computeFloorLayoutFromTableSettings(settings) {
 
     const minCx = Math.min(...tables.map(t => t.cx));
     const minCy = Math.min(...tables.map(t => t.cy));
-    const anchorX = minCx - FINE_COL_UNIT * FINE_GRID_PAD;
-    const anchorY = minCy - FINE_ROW_UNIT * FINE_GRID_PAD;
+    const anchorX = minCx - FINE_COL_UNIT;
+    const anchorY = minCy - FINE_ROW_UNIT;
 
     const placed = tables.map(t => ({
         num: t.num,
-        col: Math.round((t.cx - anchorX) / FINE_COL_UNIT),
+        col: Math.min(FLOOR_COLS, Math.max(1, Math.round((t.cx - anchorX) / FINE_COL_UNIT))),
         row: Math.round((t.cy - anchorY) / FINE_ROW_UNIT)
     }));
 
     resolveFineGridCollision(placed);
-    return compactFloorPlacement(placed);
+
+    const baseRow = Math.max(7, ...existingItems.map(i => i.gridRow)) + 1;
+    const rowMap = compactAxisMap(placed.map(t => t.row));
+
+    return placed.map(t => ({
+        num: t.num,
+        gridRow: baseRow + rowMap.get(t.row) - 1,
+        gridCol: t.col
+    }));
 }
 
 function compactAxisMap(values) {
@@ -124,46 +195,16 @@ function compactAxisMap(values) {
     return map;
 }
 
-// 壓縮行列索引，保留「卡喺兩枱之間」嘅相對位置
-function compactFloorPlacement(placed) {
-    if (!placed.length) return { items: [], numRows: 0, numCols: 0 };
-
-    const rowMap = compactAxisMap(placed.map(t => t.row));
-    const colMap = compactAxisMap(placed.map(t => t.col));
-
-    const items = placed.map(t => ({
-        num: t.num,
-        gridRow: rowMap.get(t.row),
-        gridCol: colMap.get(t.col)
-    }));
-
-    return {
-        items,
-        numRows: rowMap.size,
-        numCols: colMap.size
-    };
-}
-
-function syncFloorCellSize(numCols) {
+function syncFloorCellSize() {
     if (!floorPlanWrap) return;
     const gapPx = 12;
     const wrapW = floorPlanWrap.clientWidth || 544;
-    const cellW = Math.floor((wrapW - gapPx * (FLOOR_BASE_COLS - 1)) / FLOOR_BASE_COLS);
+    const cellW = Math.floor((wrapW - gapPx * (FLOOR_COLS - 1)) / FLOOR_COLS);
     floorPlan.style.setProperty('--floor-cell', `${Math.max(cellW, 72)}px`);
-
-    const useFit = numCols > 0 && numCols <= FLOOR_BASE_COLS;
-    floorPlan.classList.toggle('floor-plan-fit', useFit);
-    if (useFit) {
-        floorPlan.style.gridTemplateColumns = `repeat(${numCols}, minmax(0, 1fr))`;
-    } else if (numCols > 0) {
-        floorPlan.style.gridTemplateColumns = `repeat(${numCols}, var(--floor-cell))`;
-    }
-
-    floorPlan.dataset.cols = String(numCols || FLOOR_BASE_COLS);
-
-    if (floorPlanHint) {
-        floorPlanHint.classList.toggle('hidden', numCols <= FLOOR_BASE_COLS);
-    }
+    floorPlan.classList.add('floor-plan-fit');
+    floorPlan.style.gridTemplateColumns = `repeat(${FLOOR_COLS}, minmax(0, 1fr))`;
+    floorPlan.dataset.cols = String(FLOOR_COLS);
+    if (floorPlanHint) floorPlanHint.classList.add('hidden');
 }
 
 function createTableCard(num) {
@@ -179,9 +220,9 @@ function createTableCard(num) {
 }
 
 function renderFloorPlan(layout) {
-    const { items = [], numRows = 0, numCols = 0 } = layout || {};
+    const { items = [], numRows = 0 } = layout || {};
 
-    syncFloorCellSize(numCols);
+    syncFloorCellSize();
     floorPlan.innerHTML = '';
 
     if (!items.length) return;
@@ -196,10 +237,7 @@ function renderFloorPlan(layout) {
     });
 }
 
-window.addEventListener('resize', () => {
-    const cols = Number(floorPlan.dataset.cols || FLOOR_BASE_COLS);
-    syncFloorCellSize(cols);
-});
+window.addEventListener('resize', syncFloorCellSize);
 
 renderFloorPlan({ items: [], numRows: 0, numCols: 0 });
 
