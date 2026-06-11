@@ -4,10 +4,37 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-let allGuests = [];         
-let unassignedPool = [];    
-let tableSettings = {};     
+let allGuests = [];
+let unassignedPool = [];
+let tableSettings = {};
 let activeSettingTableNum = null;
+
+function normalizeTableSettings(raw) {
+    const normalized = {};
+    if (!raw) return normalized;
+
+    const entries = Array.isArray(raw)
+        ? raw.map((settings, idx) => [String(idx), settings])
+        : Object.entries(raw);
+
+    entries.forEach(([key, settings]) => {
+        const tableNum = parseInt(key, 10);
+        if (!tableNum || tableNum < 1 || !settings || typeof settings !== 'object') return;
+        if (settings.x == null || settings.y == null) return;
+        normalized[String(tableNum)] = settings;
+    });
+
+    return normalized;
+}
+
+function getTableSettingKeys() {
+    return Object.keys(tableSettings)
+        .filter(num => {
+            const settings = tableSettings[num];
+            return settings && settings.x != null && settings.y != null;
+        })
+        .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+}
 let selectedGuestContext = null;
 
 const PRIMARY_TAG_KEY = 'group';
@@ -659,7 +686,7 @@ function scheduleFloorLayoutSync(existingLayout) {
 }
 
 function getTablesBoundingBox() {
-    const nums = Object.keys(tableSettings);
+    const nums = getTableSettingKeys();
     if (nums.length === 0) return null;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     nums.forEach(num => {
@@ -675,7 +702,7 @@ function getTablesBoundingBox() {
 function snapAllTablesToGrid() {
     const updates = {};
     let changed = false;
-    Object.keys(tableSettings).forEach(num => {
+    getTableSettingKeys().forEach(num => {
         const nx = snapToGrid(tableSettings[num].x);
         const ny = snapToGrid(tableSettings[num].y);
         if (nx !== tableSettings[num].x || ny !== tableSettings[num].y) {
@@ -699,7 +726,7 @@ function centerAllTablesOnCanvas() {
     if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return Promise.resolve(false);
 
     const updates = {};
-    Object.keys(tableSettings).forEach(num => {
+    getTableSettingKeys().forEach(num => {
         tableSettings[num].x = snapToGrid(Math.round(tableSettings[num].x + dx));
         tableSettings[num].y = snapToGrid(Math.round(tableSettings[num].y + dy));
         updates[`table_settings/${num}/x`] = tableSettings[num].x;
@@ -1377,7 +1404,7 @@ function buildGuestCirclePrintHTML() {
     const offsetX = (sheetW - floorW) / 2;
     const offsetY = (sheetH - floorH) / 2;
 
-    const sortedTableNums = Object.keys(tableSettings).sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+    const sortedTableNums = getTableSettingKeys();
 
     const circles = sortedTableNums.map(tableNum => {
         const settings = tableSettings[tableNum];
@@ -1666,10 +1693,16 @@ function cancelTableDrag() {
 let seatingViewBootstrapped = false;
 
 function runRender() {
-    renderSidebar();
-    renderCanvasTables();
-    updateGlobalStats();
-    applyTransform();
+    try {
+        renderSidebar();
+        renderCanvasTables();
+        updateGlobalStats();
+        applyTransform();
+    } catch (err) {
+        console.error('排位畫布渲染失敗:', err);
+        const stats = document.getElementById('global-stats');
+        if (stats) stats.innerText = '載入失敗，請重新整理';
+    }
 }
 
 function bootstrapSeatingView() {
@@ -1688,12 +1721,12 @@ database.ref().on('value', (snapshot) => {
     const root = snapshot.val() || {};
     allGuests = root.wedding_guests || [];
     unassignedPool = root.unassigned_guests || [];
-    tableSettings = root.table_settings || {};
+    tableSettings = normalizeTableSettings(root.table_settings);
     applyMetaLabelColumns(root.meta_label_columns);
 
     let updatedSettings = false;
-    for(let i = 1; i <= 14; i++) {
-        if (!tableSettings[i]) {
+    for (let i = 1; i <= 14; i++) {
+        if (!tableSettings[String(i)]) {
             const row = Math.floor((i - 1) / 4);
             const col = (i - 1) % 4;
             const colGap = 440;
@@ -1702,7 +1735,7 @@ database.ref().on('value', (snapshot) => {
             const gridH = 3 * rowGap + TABLE_TOTAL_H;
             const startX = snapToGrid(CANVAS_W / 2 - gridW / 2);
             const startY = snapToGrid(CANVAS_H / 2 - gridH / 2);
-            tableSettings[i] = {
+            tableSettings[String(i)] = {
                 max_seats: 12,
                 x: snapToGrid(startX + col * colGap),
                 y: snapToGrid(startY + row * rowGap)
@@ -1711,7 +1744,7 @@ database.ref().on('value', (snapshot) => {
         }
     }
     if (updatedSettings) {
-        database.ref('table_settings').update(tableSettings).catch(err => {
+        database.ref('table_settings').set(tableSettings).catch(err => {
             console.warn('table_settings 初始化失敗:', err);
         });
         bootstrapSeatingView();
@@ -1836,12 +1869,13 @@ function renderGroupData(groups, container) {
 }
 
 function renderCanvasTables() {
-    const sortedTableNums = Object.keys(tableSettings).sort((a,b) => parseInt(a) - parseInt(b));
+    const sortedTableNums = getTableSettingKeys();
     document.querySelectorAll('.draggable-table').forEach(el => el.remove());
 
     sortedTableNums.forEach(tableNum => {
-        const idx = parseInt(tableNum);
+        const idx = parseInt(tableNum, 10);
         const settings = tableSettings[tableNum];
+        if (!settings) return;
         const maxSeats = settings.max_seats || 12;
         const guestsInTable = allGuests[idx] || [];
         const filled = guestsInTable.filter(g => g && g.name).length;
