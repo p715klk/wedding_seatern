@@ -549,6 +549,89 @@ function zoomCanvas(factor) {
     );
 }
 
+const FLOOR_GRID_COLS = 4;
+const FLOOR_ROW_Y_THRESHOLD = 250;
+
+function computeFloorLayoutFromTableSettings(settings) {
+    const nums = Object.keys(settings || {}).filter(n => settings[n] && settings[n].x != null && settings[n].y != null);
+    if (!nums.length) return null;
+
+    const tables = nums.map(num => ({
+        num: String(num),
+        cx: settings[num].x + PLATE_CENTER,
+        cy: settings[num].y + PLATE_CENTER
+    }));
+
+    tables.sort((a, b) => a.cy - b.cy || a.cx - b.cx);
+
+    const rows = [];
+    let bucket = [];
+    let rowCenterY = null;
+
+    tables.forEach(t => {
+        if (rowCenterY === null || Math.abs(t.cy - rowCenterY) > FLOOR_ROW_Y_THRESHOLD) {
+            if (bucket.length) rows.push(bucket);
+            bucket = [t];
+            rowCenterY = t.cy;
+        } else {
+            bucket.push(t);
+            rowCenterY = bucket.reduce((sum, item) => sum + item.cy, 0) / bucket.length;
+        }
+    });
+    if (bucket.length) rows.push(bucket);
+
+    const allCx = tables.map(t => t.cx);
+    const globalMinX = Math.min(...allCx);
+    const globalMaxX = Math.max(...allCx);
+
+    function assignColumn(cx, rowMinX, rowMaxX) {
+        const rowSpan = rowMaxX - rowMinX;
+        const useMin = rowSpan > 80 ? rowMinX : globalMinX;
+        const useMax = rowSpan > 80 ? rowMaxX : globalMaxX;
+        const useSpan = Math.max(useMax - useMin, 1);
+        const ratio = (cx - useMin) / useSpan;
+        return Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.round(ratio * (FLOOR_GRID_COLS - 1))));
+    }
+
+    function resolveColumn(row, preferredCol) {
+        if (row[preferredCol] === '.') return preferredCol;
+        for (let d = 1; d < FLOOR_GRID_COLS; d++) {
+            if (preferredCol - d >= 0 && row[preferredCol - d] === '.') return preferredCol - d;
+            if (preferredCol + d < FLOOR_GRID_COLS && row[preferredCol + d] === '.') return preferredCol + d;
+        }
+        return preferredCol;
+    }
+
+    return rows.map(rowTables => {
+        const row = ['.', '.', '.', '.'];
+        rowTables.sort((a, b) => a.cx - b.cx);
+        const rowMinX = Math.min(...rowTables.map(t => t.cx));
+        const rowMaxX = Math.max(...rowTables.map(t => t.cx));
+
+        rowTables.forEach(t => {
+            const col = resolveColumn(row, assignColumn(t.cx, rowMinX, rowMaxX));
+            if (row[col] === '.') row[col] = t.num;
+        });
+        return row;
+    });
+}
+
+let lastPersistedFloorLayoutJson = null;
+
+function syncFloorLayoutIfNeeded(existingLayout) {
+    const computed = computeFloorLayoutFromTableSettings(tableSettings);
+    if (!computed) return Promise.resolve();
+    const computedJson = JSON.stringify(computed);
+    const existingJson = JSON.stringify(existingLayout);
+    if (computedJson === existingJson) {
+        lastPersistedFloorLayoutJson = computedJson;
+        return Promise.resolve();
+    }
+    if (computedJson === lastPersistedFloorLayoutJson) return Promise.resolve();
+    lastPersistedFloorLayoutJson = computedJson;
+    return database.ref('floor_layout').set(computed);
+}
+
 function getTablesBoundingBox() {
     const nums = Object.keys(tableSettings);
     if (nums.length === 0) return null;
@@ -1609,12 +1692,12 @@ database.ref().on('value', (snapshot) => {
     if (!localStorage.getItem('seating_grid_snap_v1')) {
         snapAllTablesToGrid().then(() => {
             localStorage.setItem('seating_grid_snap_v1', '1');
-            bootstrapSeatingView();
+            syncFloorLayoutIfNeeded(root.floor_layout).then(() => bootstrapSeatingView());
         });
         return;
     }
 
-    bootstrapSeatingView();
+    syncFloorLayoutIfNeeded(root.floor_layout).then(() => bootstrapSeatingView());
 });
 
 window.addEventListener('resize', () => {

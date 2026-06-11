@@ -5,8 +5,8 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-// 座位排佈
-const layout = [
+// 簽到頁預設排位（Firebase 未有 floor_layout 時使用）
+const DEFAULT_FLOOR_LAYOUT = [
     ['.', '1', '2', '.'],
     ['.', '3', '4', '.'],
     ['11', '5', '6', '13'],
@@ -14,8 +14,10 @@ const layout = [
     ['.', '9', '10', '.']
 ];
 
-let dbData = {};     
+let dbData = {};
 let statusState = {};
+let currentFloorLayoutJson = '';
+const floorPlan = document.getElementById('floor-plan');
 
 function normalizeGuestTags(val) {
     if (!val) return [];
@@ -44,32 +46,43 @@ function guestMatchesKeyword(guest, keyword) {
     return name.includes(keyword) || side.includes(keyword) || tags.some(t => t.toLowerCase().includes(keyword));
 }
 
-// 初始化平面圖
-const floorPlan = document.getElementById('floor-plan');
-layout.forEach(row => {
-    row.forEach(cell => {
-        const div = document.createElement('div');
-        if (cell === '.') {
-            div.className = "h-20";
-        } else {
-            div.className = "bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center h-24 cursor-pointer hover:border-red-400 transition active:scale-95";
-            div.id = `table-card-${cell}`;
-            div.setAttribute('onclick', `openModal('${cell}')`);
-            div.innerHTML = `
-                <span class="text-sm font-bold text-gray-500">第 ${cell} 桌</span>
-                <div class="w-12 h-12 rounded-full border-4 border-gray-300 flex items-center justify-center text-xs font-black text-gray-400" id="table-circle-${cell}">0%</div>
-            `;
-        }
-        floorPlan.appendChild(div);
+function renderFloorPlan(layout) {
+    const grid = Array.isArray(layout) && layout.length ? layout : DEFAULT_FLOOR_LAYOUT;
+    floorPlan.innerHTML = '';
+    grid.forEach(row => {
+        row.forEach(cell => {
+            const div = document.createElement('div');
+            if (cell === '.') {
+                div.className = "h-20";
+            } else {
+                div.className = "bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center h-24 cursor-pointer hover:border-red-400 transition active:scale-95";
+                div.id = `table-card-${cell}`;
+                div.setAttribute('onclick', `openModal('${cell}')`);
+                div.innerHTML = `
+                    <span class="text-sm font-bold text-gray-500">第 ${cell} 桌</span>
+                    <div class="w-12 h-12 rounded-full border-4 border-gray-300 flex items-center justify-center text-xs font-black text-gray-400" id="table-circle-${cell}">0%</div>
+                `;
+            }
+            floorPlan.appendChild(div);
+        });
     });
-});
+}
+
+renderFloorPlan(DEFAULT_FLOOR_LAYOUT);
 
 // Firebase 即時監聽
 database.ref().on('value', (snapshot) => {
     const root = snapshot.val() || {};
     dbData = root.wedding_guests || {};
     statusState = root.guest_status || {};
-    
+
+    const layout = root.floor_layout || DEFAULT_FLOOR_LAYOUT;
+    const layoutJson = JSON.stringify(layout);
+    if (layoutJson !== currentFloorLayoutJson) {
+        currentFloorLayoutJson = layoutJson;
+        renderFloorPlan(layout);
+    }
+
     updateFloorPlanSummary();
     
     const currentTable = document.getElementById('guest-modal').getAttribute('data-current-table');
