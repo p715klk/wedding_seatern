@@ -27,20 +27,16 @@ html, body {
     margin: 0 auto;
     width: max-content;
     max-width: 100%;
+    justify-items: center;
+    align-items: center;
 }
 
 #floor-plan.floor-plan-fit {
     width: 100%;
 }
 
-#floor-plan.floor-plan-fit .floor-cell-empty,
 #floor-plan.floor-plan-fit .floor-cell-table {
     width: 100%;
-}
-
-#floor-plan .floor-cell-empty {
-    width: var(--floor-cell);
-    height: 5rem;
 }
 
 #floor-plan .floor-cell-table {

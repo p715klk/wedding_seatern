@@ -91,11 +91,11 @@ function resolveFineGridCollision(placed) {
     });
 }
 
-// 依 seating x/y 量化成細格（枱數不限；13 可喺 4 同 6 右側之間）
+// 依 seating x/y 量化 — 只記錄每張枱嘅格位（唔產生空白格）
 function computeFloorLayoutFromTableSettings(settings) {
     const normalized = normalizeTableSettings(settings);
     const nums = Object.keys(normalized);
-    if (!nums.length) return { cols: 4, rows: [['.', '.', '.', '.']] };
+    if (!nums.length) return { items: [], numRows: 0, numCols: 0 };
 
     const tables = nums.map(num => ({
         num: String(num),
@@ -115,104 +115,93 @@ function computeFloorLayoutFromTableSettings(settings) {
     }));
 
     resolveFineGridCollision(placed);
-
-    const minCol = Math.min(...placed.map(t => t.col));
-    const maxCol = Math.max(...placed.map(t => t.col));
-    const minRow = Math.min(...placed.map(t => t.row));
-    const maxRow = Math.max(...placed.map(t => t.row));
-    const cols = maxCol - minCol + 1 + FINE_GRID_PAD;
-
-    const rows = [];
-    for (let r = minRow; r <= maxRow + FINE_GRID_PAD; r++) {
-        rows.push(Array(cols).fill('.'));
-    }
-
-    placed.forEach(t => {
-        const rIdx = t.row - minRow;
-        const cIdx = t.col - minCol;
-        if (rows[rIdx] && cIdx >= 0 && cIdx < cols) {
-            rows[rIdx][cIdx] = t.num;
-        }
-    });
-
-    return { cols, rows };
+    return compactFloorPlacement(placed);
 }
 
-function trimFloorGrid(rows) {
-    if (!rows.length) return rows;
-
-    let top = 0;
-    let bottom = rows.length - 1;
-    while (top < bottom && rows[top].every(c => c === '.')) top++;
-    while (bottom > top && rows[bottom].every(c => c === '.')) bottom--;
-
-    const trimmed = rows.slice(top, bottom + 1);
-    if (!trimmed.length) return rows;
-
-    let left = 0;
-    let right = trimmed[0].length - 1;
-    while (left < right && trimmed.every(row => row[left] === '.')) left++;
-    while (right > left && trimmed.every(row => row[right] === '.')) right++;
-
-    return trimmed.map(row => row.slice(left, right + 1));
+function compactAxisMap(values) {
+    const map = new Map();
+    [...new Set(values)].sort((a, b) => a - b).forEach((v, i) => map.set(v, i + 1));
+    return map;
 }
 
-function syncFloorCellSize(cols) {
+// 壓縮行列索引，保留「卡喺兩枱之間」嘅相對位置
+function compactFloorPlacement(placed) {
+    if (!placed.length) return { items: [], numRows: 0, numCols: 0 };
+
+    const rowMap = compactAxisMap(placed.map(t => t.row));
+    const colMap = compactAxisMap(placed.map(t => t.col));
+
+    const items = placed.map(t => ({
+        num: t.num,
+        gridRow: rowMap.get(t.row),
+        gridCol: colMap.get(t.col)
+    }));
+
+    return {
+        items,
+        numRows: rowMap.size,
+        numCols: colMap.size
+    };
+}
+
+function syncFloorCellSize(numCols) {
     if (!floorPlanWrap) return;
     const gapPx = 12;
     const wrapW = floorPlanWrap.clientWidth || 544;
     const cellW = Math.floor((wrapW - gapPx * (FLOOR_BASE_COLS - 1)) / FLOOR_BASE_COLS);
     floorPlan.style.setProperty('--floor-cell', `${Math.max(cellW, 72)}px`);
 
-    const useFit = cols <= FLOOR_BASE_COLS;
+    const useFit = numCols > 0 && numCols <= FLOOR_BASE_COLS;
     floorPlan.classList.toggle('floor-plan-fit', useFit);
     if (useFit) {
-        floorPlan.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-    } else {
-        floorPlan.style.gridTemplateColumns = `repeat(${cols}, var(--floor-cell))`;
+        floorPlan.style.gridTemplateColumns = `repeat(${numCols}, minmax(0, 1fr))`;
+    } else if (numCols > 0) {
+        floorPlan.style.gridTemplateColumns = `repeat(${numCols}, var(--floor-cell))`;
     }
 
+    floorPlan.dataset.cols = String(numCols || FLOOR_BASE_COLS);
+
     if (floorPlanHint) {
-        floorPlanHint.classList.toggle('hidden', cols <= FLOOR_BASE_COLS);
+        floorPlanHint.classList.toggle('hidden', numCols <= FLOOR_BASE_COLS);
     }
 }
 
-function renderFloorPlan(layoutData) {
-    const raw = layoutData?.rows
-        ? layoutData
-        : { cols: 4, rows: [['.', '.', '.', '.']] };
-    const rows = trimFloorGrid(raw.rows.map(r => r.slice()));
-    const cols = rows[0]?.length || raw.cols || FLOOR_BASE_COLS;
+function createTableCard(num) {
+    const div = document.createElement('div');
+    div.className = 'floor-cell-table bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center cursor-pointer hover:border-red-400 transition active:scale-95';
+    div.id = `table-card-${num}`;
+    div.setAttribute('onclick', `openModal('${num}')`);
+    div.innerHTML = `
+        <span class="text-sm font-bold text-gray-500">第 ${num} 桌</span>
+        <div class="w-12 h-12 rounded-full border-4 border-gray-300 flex items-center justify-center text-xs font-black text-gray-400" id="table-circle-${num}">0%</div>
+    `;
+    return div;
+}
 
-    syncFloorCellSize(cols);
+function renderFloorPlan(layout) {
+    const { items = [], numRows = 0, numCols = 0 } = layout || {};
+
+    syncFloorCellSize(numCols);
     floorPlan.innerHTML = '';
 
-    rows.forEach(row => {
-        row.forEach(cell => {
-            const div = document.createElement('div');
-            if (cell === '.') {
-                div.className = 'floor-cell-empty';
-                div.setAttribute('aria-hidden', 'true');
-            } else {
-                div.className = 'floor-cell-table bg-white p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center cursor-pointer hover:border-red-400 transition active:scale-95';
-                div.id = `table-card-${cell}`;
-                div.setAttribute('onclick', `openModal('${cell}')`);
-                div.innerHTML = `
-                    <span class="text-sm font-bold text-gray-500">第 ${cell} 桌</span>
-                    <div class="w-12 h-12 rounded-full border-4 border-gray-300 flex items-center justify-center text-xs font-black text-gray-400" id="table-circle-${cell}">0%</div>
-                `;
-            }
-            floorPlan.appendChild(div);
-        });
+    if (!items.length) return;
+
+    floorPlan.style.gridTemplateRows = `repeat(${numRows}, 6rem)`;
+
+    items.forEach(({ num, gridRow, gridCol }) => {
+        const div = createTableCard(num);
+        div.style.gridRow = String(gridRow);
+        div.style.gridColumn = String(gridCol);
+        floorPlan.appendChild(div);
     });
 }
 
 window.addEventListener('resize', () => {
-    const cols = floorPlan.style.gridTemplateColumns.match(/repeat\((\d+)/)?.[1];
-    if (cols) syncFloorCellSize(Number(cols));
+    const cols = Number(floorPlan.dataset.cols || FLOOR_BASE_COLS);
+    syncFloorCellSize(cols);
 });
 
-renderFloorPlan({ cols: 4, rows: [['.', '.', '.', '.']] });
+renderFloorPlan({ items: [], numRows: 0, numCols: 0 });
 
 // Firebase 即時監聽 — 排位跟 table_settings 動態更新
 database.ref().on('value', (snapshot) => {

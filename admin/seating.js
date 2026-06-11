@@ -649,11 +649,32 @@ function resolveFineGridCollision(placed) {
     });
 }
 
-// 依 seating 畫布 x/y 量化成細格（枱數不限）
+function compactAxisMap(values) {
+    const map = new Map();
+    [...new Set(values)].sort((a, b) => a - b).forEach((v, i) => map.set(v, i + 1));
+    return map;
+}
+
+function compactFloorPlacement(placed) {
+    if (!placed.length) return { items: [], numRows: 0, numCols: 0 };
+
+    const rowMap = compactAxisMap(placed.map(t => t.row));
+    const colMap = compactAxisMap(placed.map(t => t.col));
+
+    const items = placed.map(t => ({
+        num: t.num,
+        gridRow: rowMap.get(t.row),
+        gridCol: colMap.get(t.col)
+    }));
+
+    return { items, numRows: rowMap.size, numCols: colMap.size };
+}
+
+// 依 seating 畫布 x/y 量化 — 稀疏排位（枱可卡喺兩枱之間）
 function computeFloorLayoutFromTableSettings(settings) {
     const normalized = normalizeTableSettings(settings);
     const nums = Object.keys(normalized);
-    if (!nums.length) return { cols: 4, rows: [['.', '.', '.', '.']] };
+    if (!nums.length) return { items: [], numRows: 0, numCols: 0 };
 
     const tables = nums.map(num => ({
         num: String(num),
@@ -673,27 +694,7 @@ function computeFloorLayoutFromTableSettings(settings) {
     }));
 
     resolveFineGridCollision(placed);
-
-    const minCol = Math.min(...placed.map(t => t.col));
-    const maxCol = Math.max(...placed.map(t => t.col));
-    const minRow = Math.min(...placed.map(t => t.row));
-    const maxRow = Math.max(...placed.map(t => t.row));
-    const cols = maxCol - minCol + 1 + FINE_GRID_PAD;
-
-    const rows = [];
-    for (let r = minRow; r <= maxRow + FINE_GRID_PAD; r++) {
-        rows.push(Array(cols).fill('.'));
-    }
-
-    placed.forEach(t => {
-        const rIdx = t.row - minRow;
-        const cIdx = t.col - minCol;
-        if (rows[rIdx] && cIdx >= 0 && cIdx < cols) {
-            rows[rIdx][cIdx] = t.num;
-        }
-    });
-
-    return { cols, rows };
+    return compactFloorPlacement(placed);
 }
 
 function buildSignInFloorLayout(settings) {
@@ -704,6 +705,17 @@ let lastPersistedFloorLayoutJson = null;
 
 function normalizeFloorLayout(layout) {
     if (!layout) return null;
+    if (Array.isArray(layout.items)) {
+        return {
+            items: layout.items.map(item => ({
+                num: String(item.num),
+                gridRow: Number(item.gridRow),
+                gridCol: Number(item.gridCol)
+            })),
+            numRows: Number(layout.numRows) || 0,
+            numCols: Number(layout.numCols) || 0
+        };
+    }
     if (layout.cols != null && Array.isArray(layout.rows)) {
         return {
             cols: Number(layout.cols) || layout.rows[0]?.length || 4,
