@@ -679,6 +679,12 @@ function scheduleFloorLayoutSync(existingLayout = null) {
     syncFloorLayoutIfNeeded(existingLayout);
 }
 
+function forceFloorLayoutSync() {
+    const layout = buildSignInFloorLayout(tableSettings);
+    lastPersistedFloorLayoutJson = JSON.stringify(layout);
+    return database.ref('floor_layout').set(layout);
+}
+
 function getTablesBoundingBox() {
     const nums = getTableSettingKeys();
     if (nums.length === 0) return null;
@@ -2285,10 +2291,13 @@ function saveTableSettingsAction() {
     updates[`wedding_guests/${newIdx}`] = guests;
     updates[`wedding_guests/${oldIdx}`] = null;
 
-    database.ref().update(updates).then(() => {
-        scheduleFloorLayoutSync();
-        closeSettingsModal();
-    }).catch(err => alert(`❌ 儲存失敗：${err.message || err}`));
+    database.ref().update(updates).then(() => persistTableSettings())
+        .then(() => forceFloorLayoutSync())
+        .then(() => {
+            runRender();
+            closeSettingsModal();
+        })
+        .catch(err => alert(`❌ 儲存失敗：${err.message || err}`));
 }
 
 function deleteTableAction() {
@@ -2310,18 +2319,16 @@ function deleteTableAction() {
 
     delete tableSettings[tableNum];
 
-    const updates = {
-        [`wedding_guests/${idx}`]: null,
-        [`table_settings/${tableNum}`]: null
-    };
-
     Promise.all([
-        database.ref().update(updates),
+        persistTableSettings(),
+        database.ref(`wedding_guests/${idx}`).set(null),
         database.ref('unassigned_guests').set(unassignedPool)
-    ]).then(() => {
-        scheduleFloorLayoutSync();
-        closeSettingsModal();
-    }).catch(err => alert(`❌ 刪除失敗：${err.message || err}`));
+    ]).then(() => forceFloorLayoutSync())
+        .then(() => {
+            runRender();
+            closeSettingsModal();
+        })
+        .catch(err => alert(`❌ 刪除失敗：${err.message || err}`));
 }
 
 applyPrintPageStyle();

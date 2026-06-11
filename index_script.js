@@ -51,6 +51,39 @@ function isValidFloorLayout(layout) {
     return layout.every(row => Array.isArray(row) && row.length === 4);
 }
 
+function normalizeTableSettings(raw) {
+    const normalized = {};
+    if (!raw) return normalized;
+
+    const entries = Array.isArray(raw)
+        ? raw.map((settings, idx) => [String(idx), settings])
+        : Object.entries(raw);
+
+    entries.forEach(([key, settings]) => {
+        const tableNum = parseInt(key, 10);
+        if (!tableNum || tableNum < 1 || !settings || typeof settings !== 'object') return;
+        if (settings.x == null || settings.y == null) return;
+        normalized[String(tableNum)] = settings;
+    });
+
+    return normalized;
+}
+
+function getActiveTableNums(tableSettingsRaw) {
+    return new Set(Object.keys(normalizeTableSettings(tableSettingsRaw)));
+}
+
+function filterFloorLayoutByActiveTables(layout, tableSettingsRaw) {
+    const active = getActiveTableNums(tableSettingsRaw);
+    const base = isValidFloorLayout(layout) ? layout : DEFAULT_FLOOR_LAYOUT;
+    return base.map(row =>
+        row.map(cell => {
+            if (cell === '.' || cell === '') return '.';
+            return active.has(String(cell)) ? String(cell) : '.';
+        })
+    );
+}
+
 function renderFloorPlan(layout) {
     const grid = Array.isArray(layout) && layout.length ? layout : DEFAULT_FLOOR_LAYOUT;
     floorPlan.innerHTML = '';
@@ -81,7 +114,7 @@ database.ref().on('value', (snapshot) => {
     dbData = root.wedding_guests || {};
     statusState = root.guest_status || {};
 
-    const layout = isValidFloorLayout(root.floor_layout) ? root.floor_layout : DEFAULT_FLOOR_LAYOUT;
+    const layout = filterFloorLayoutByActiveTables(root.floor_layout, root.table_settings);
     const layoutJson = JSON.stringify(layout);
     if (layoutJson !== currentFloorLayoutJson) {
         currentFloorLayoutJson = layoutJson;
