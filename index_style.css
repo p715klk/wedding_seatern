@@ -5,8 +5,9 @@ body {
     user-select: none;
 }
 
+/* 允許平面圖區域內 scroll + tap（body 用 manipulation 會令嵌套 scroll 點擊失效） */
 html, body {
-    touch-action: manipulation;
+    touch-action: pan-x pan-y;
 }
 
 /* 簽到頁平面圖 — 固定尺寸正方形枱，超出就 scroll */
@@ -24,6 +25,8 @@ html, body {
     max-height: min(75vh, 640px);
     border-radius: 0.75rem;
     background: rgba(255, 255, 255, 0.45);
+    position: relative;
+    isolation: isolate;
 }
 
 #floor-plan {
@@ -31,6 +34,7 @@ html, body {
     position: relative;
     margin: 0 auto;
     flex-shrink: 0;
+    box-sizing: content-box;
 }
 
 #floor-plan .floor-cell-table {
@@ -39,12 +43,17 @@ html, body {
     height: var(--floor-table-px);
     box-sizing: border-box;
     overflow: hidden;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(239, 68, 68, 0.15);
+    z-index: 1;
+    transform: translateZ(0);
 }
 
 .floor-table-label {
     font-size: 0.65rem;
     line-height: 1.15;
     white-space: nowrap;
+    pointer-events: none;
 }
 
 .floor-table-ring {
@@ -52,10 +61,16 @@ html, body {
     height: 2.25rem;
     flex-shrink: 0;
     font-size: 0.6rem;
+    pointer-events: none;
 }
 
 @media screen and (max-width: 768px) {
     input, select, textarea, .excel-input, .table-select {
         font-size: 16px !important;
+        touch-action: manipulation;
+    }
+
+    .floor-plan-wrap {
+        max-height: min(70vh, 560px);
     }
 }

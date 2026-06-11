@@ -105,12 +105,66 @@ function createTableCard(num) {
     const div = document.createElement('div');
     div.className = 'floor-cell-table bg-white p-1 sm:p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center cursor-pointer hover:border-red-400 transition active:scale-95';
     div.id = `table-card-${num}`;
-    div.setAttribute('onclick', `openModal('${num}')`);
+    div.setAttribute('role', 'button');
+    div.setAttribute('tabindex', '0');
     div.innerHTML = `
         <span class="floor-table-label font-bold text-gray-500">第 ${num} 桌</span>
         <div class="${TABLE_RING_BASE} border-gray-300 text-gray-400" id="table-circle-${num}">0%</div>
     `;
+    bindTableCardInteraction(div, num);
     return div;
+}
+
+function bindTableCardInteraction(card, num) {
+    const activate = () => openModal(num);
+    let touchStart = null;
+    let touchMoved = false;
+
+    card.addEventListener('click', (e) => {
+        if (card.dataset.touchHandled === '1') {
+            card.dataset.touchHandled = '';
+            return;
+        }
+        activate();
+    });
+
+    card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            activate();
+        }
+    });
+
+    card.addEventListener('touchstart', (e) => {
+        touchMoved = false;
+        touchStart = {
+            x: e.touches[0].clientX,
+            y: e.touches[0].clientY
+        };
+    }, { passive: true });
+
+    card.addEventListener('touchmove', (e) => {
+        if (!touchStart) return;
+        const dx = e.touches[0].clientX - touchStart.x;
+        const dy = e.touches[0].clientY - touchStart.y;
+        if (Math.hypot(dx, dy) > 10) touchMoved = true;
+    }, { passive: true });
+
+    card.addEventListener('touchend', (e) => {
+        if (!touchStart || touchMoved) {
+            touchStart = null;
+            return;
+        }
+        e.preventDefault();
+        card.dataset.touchHandled = '1';
+        activate();
+        touchStart = null;
+    }, { passive: false });
+
+    card.addEventListener('touchcancel', () => {
+        touchStart = null;
+        touchMoved = false;
+    }, { passive: true });
 }
 
 function renderFloorPlan(layout) {
@@ -125,8 +179,12 @@ function renderFloorPlan(layout) {
     }
 
     const scale = FLOOR_CANVAS_SCALE;
-    floorPlan.style.width = `${Math.ceil(bounds.width * scale)}px`;
-    floorPlan.style.height = `${Math.ceil(bounds.height * scale)}px`;
+    const canvasW = Math.ceil(bounds.width * scale);
+    const canvasH = Math.ceil(bounds.height * scale);
+    const scrollPad = FLOOR_TABLE_PX;
+
+    floorPlan.style.width = `${canvasW}px`;
+    floorPlan.style.height = `${canvasH + scrollPad}px`;
     floorPlan.style.setProperty('--floor-table-px', `${FLOOR_TABLE_PX}px`);
 
     items.forEach(({ num, x, y }) => {
