@@ -57,10 +57,10 @@ html, body {
 }
 
 .floor-table-ring {
-    width: 2.25rem;
-    height: 2.25rem;
+    width: 2.85rem;
+    height: 2.85rem;
     flex-shrink: 0;
-    font-size: 0.6rem;
+    font-size: 0.8rem;
     pointer-events: none;
 }
 
