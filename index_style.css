@@ -66,7 +66,7 @@ html, body {
     width: 2.85rem;
     height: 2.85rem;
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1;
     pointer-events: none;
 }
