@@ -763,38 +763,17 @@ function getTablesBoundingBox() {
     return { minX, minY, maxX, maxY, centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2 };
 }
 
-function getRenderedTablesScreenBounds() {
-    const tables = canvas.querySelectorAll('.draggable-table');
-    if (!tables.length) return null;
-    const vpRect = viewport.getBoundingClientRect();
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    tables.forEach(el => {
-        const r = el.getBoundingClientRect();
-        minX = Math.min(minX, r.left - vpRect.left);
-        minY = Math.min(minY, r.top - vpRect.top);
-        maxX = Math.max(maxX, r.right - vpRect.left);
-        maxY = Math.max(maxY, r.bottom - vpRect.top);
-    });
-    return {
-        minX, minY, maxX, maxY,
-        width: maxX - minX,
-        height: maxY - minY,
-        centerX: (minX + maxX) / 2,
-        centerY: (minY + maxY) / 2
-    };
-}
-
-function panViewToCenterTables() {
-    const screenBounds = getRenderedTablesScreenBounds();
-    if (!screenBounds) return;
+function panViewToCanvasPoint(canvasX, canvasY) {
     const target = getVisibleViewportCenter();
-    panX += target.x - screenBounds.centerX;
-    panY += target.y - screenBounds.centerY;
+    panX = target.x - canvasX * zoom;
+    panY = target.y - canvasY * zoom;
     applyTransform();
 }
 
 function centerViewOnTables() {
-    panViewToCenterTables();
+    const bounds = getTablesBoundingBox();
+    if (!bounds) return;
+    panViewToCanvasPoint(bounds.centerX, bounds.centerY);
 }
 
 function snapAllTablesToGrid() {
@@ -852,8 +831,7 @@ function fitViewToTables() {
     const minZoom = mobile ? 0.12 : 0.35;
     zoom = Math.min(maxZoom, Math.max(minZoom, Math.min(zoomX, zoomY)));
 
-    applyTransform();
-    panViewToCenterTables();
+    panViewToCanvasPoint(bounds.centerX, bounds.centerY);
 }
 
 function getOccupancyColor(filled, maxSeats) {
