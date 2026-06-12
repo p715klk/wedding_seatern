@@ -486,7 +486,7 @@
                 <span id="zoom-percent" class="px-2 font-mono text-slate-700 font-bold min-w-[45px] text-center">100%</span>
                 <button onclick="zoomCanvas(1.1)" class="px-2.5 hover:bg-slate-200 font-bold text-slate-500">＋</button>
             </div>
-            <button onclick="fitViewToTables()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition" title="將視野置中到所有枱">
+            <button onclick="centerViewOnTables()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition" title="將視野置中到所有枱的中間點（保持縮放）">
                 🎯<span class="hide-mobile"> 置中</span>
             </button>
             <button onclick="createNewTableAction()" class="hide-mobile bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition">
@@ -665,6 +665,6 @@
         </div>
     </div>
 
-    <script src="seating.js?v=27"></script>
+    <script src="seating.js?v=28"></script>
 </body>
 </html>
