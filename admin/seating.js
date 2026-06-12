@@ -776,6 +776,85 @@ function centerViewOnTables() {
     panViewToCanvasPoint(bounds.centerX, bounds.centerY);
 }
 
+function getTableCanvasCenter(tableNum) {
+    const s = tableSettings[String(tableNum)];
+    if (!s || s.x == null || s.y == null) return null;
+    const x = Number(s.x);
+    const y = Number(s.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x: x + TABLE_DIM / 2, y: y + TABLE_TOTAL_H / 2 };
+}
+
+function flyToTable(tableNum) {
+    const center = getTableCanvasCenter(tableNum);
+    if (!center) return;
+    panViewToCanvasPoint(center.x, center.y);
+    closeFindTableMenu();
+    const el = canvas.querySelector(`.draggable-table[data-table="${tableNum}"]`);
+    if (el) {
+        el.classList.remove('find-table-flash');
+        void el.offsetWidth;
+        el.classList.add('find-table-flash');
+        setTimeout(() => el.classList.remove('find-table-flash'), 1200);
+    }
+}
+
+function refreshFindTableMenu() {
+    const list = document.getElementById('find-table-list');
+    if (!list) return;
+    const nums = getTableSettingKeys();
+    if (!nums.length) {
+        list.innerHTML = '<p class="px-3 py-2 text-slate-400 font-bold text-[11px]">未有圓枱</p>';
+        return;
+    }
+    list.innerHTML = nums.map(num => {
+        const label = (tableSettings[num]?.label || '').trim();
+        const sub = label ? `<span class="block text-[10px] font-semibold text-slate-400 truncate max-w-[140px]">${escapeHtml(label)}</span>` : '';
+        return `<button type="button" onclick="flyToTable('${num}')" class="find-table-item w-full text-left px-3 py-2 hover:bg-indigo-50 active:bg-indigo-100 text-slate-700 border-t border-slate-100 first:border-t-0">
+            <span class="font-black">Table ${num}</span>${sub}
+        </button>`;
+    }).join('');
+}
+
+function closeFindTableMenu() {
+    const menu = document.getElementById('find-table-menu');
+    if (menu) {
+        menu.classList.add('hidden');
+        menu.classList.remove('is-fixed');
+        menu.style.top = '';
+        menu.style.right = '';
+        menu.style.left = '';
+    }
+}
+
+let findTableMenuIgnoreCloseUntil = 0;
+
+function positionFindTableMenuFixed() {
+    const btn = document.getElementById('btn-find-table');
+    const menu = document.getElementById('find-table-menu');
+    if (!btn || !menu) return;
+    const rect = btn.getBoundingClientRect();
+    menu.classList.add('is-fixed');
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+    menu.style.left = 'auto';
+}
+
+function toggleFindTableMenu(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('find-table-menu');
+    if (!menu) return;
+    const willOpen = menu.classList.contains('hidden');
+    if (willOpen) refreshFindTableMenu();
+    menu.classList.toggle('hidden');
+    if (willOpen) {
+        findTableMenuIgnoreCloseUntil = Date.now() + 400;
+        if (isMobileViewport()) positionFindTableMenuFixed();
+    } else {
+        closeFindTableMenu();
+    }
+}
+
 function snapAllTablesToGrid() {
     const updates = {};
     let changed = false;
@@ -1218,6 +1297,10 @@ function handlePrintMenuAction(action, event) {
 document.addEventListener('click', (e) => {
     if (Date.now() < printMenuIgnoreCloseUntil) return;
     if (!e.target.closest('#print-menu-wrap')) closePrintMenu();
+});
+document.addEventListener('click', (e) => {
+    if (Date.now() < findTableMenuIgnoreCloseUntil) return;
+    if (!e.target.closest('#find-table-wrap')) closeFindTableMenu();
 });
 
 let printPreviewCleanup = null;
@@ -1773,6 +1856,7 @@ function runRender() {
         renderCanvasTables();
         updateGlobalStats();
         applyTransform();
+        refreshFindTableMenu();
     } catch (err) {
         console.error('排位畫布渲染失敗:', err);
         const stats = document.getElementById('global-stats');
