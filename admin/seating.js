@@ -475,6 +475,7 @@ function applyTransform() {
     canvas.style.setProperty('--zoom', zoom);
     document.getElementById('zoom-percent').innerText = `${Math.round(zoom * 100)}%`;
     updateAllTablePositions();
+    guestNameFontRatioCache.clear();
 }
 
 function updateAllTablePositions() {
@@ -1027,12 +1028,20 @@ function formatCJKMainPart(mainPart) {
     return escapeHtml(mainPart);
 }
 
+const guestNameFontRatioCache = new Map();
+
 function measureGuestNameFontRatio(circle) {
     const guestSize = parseFloat(getComputedStyle(circle).getPropertyValue('--guest-size')) || 64;
     const textSpan = circle.querySelector('.guest-name-text');
     if (!textSpan) return 0.19;
 
     const zoomVal = parseFloat(getComputedStyle(canvas).getPropertyValue('--zoom')) || 1;
+    const nameKey = textSpan.getAttribute('title') || textSpan.textContent || '';
+    const cacheKey = `${nameKey}|${guestSize}|${Math.round(zoomVal * 1000)}`;
+    if (guestNameFontRatioCache.has(cacheKey)) {
+        return guestNameFontRatioCache.get(cacheKey);
+    }
+
     const inner = getGuestNameInnerSize(guestSize) * zoomVal;
     let lo = GUEST_NAME_FONT_RATIO_MIN;
     let hi = getGuestNameFontRatioCap(guestSize);
@@ -1047,7 +1056,9 @@ function measureGuestNameFontRatio(circle) {
     }
 
     circle.style.fontSize = prevFontSize;
-    return Math.max(GUEST_NAME_FONT_RATIO_MIN, lo);
+    const ratio = Math.max(GUEST_NAME_FONT_RATIO_MIN, lo);
+    guestNameFontRatioCache.set(cacheKey, ratio);
+    return ratio;
 }
 
 function fitAllGuestNameFonts() {
@@ -1634,18 +1645,51 @@ function sortGuestArraysBySeat() {
 }
 
 let suppressGuestRemoteRenderCount = 0;
+const guestPersistPendingTables = new Set();
+let guestPersistPoolDirty = false;
 
-function persistGuestState() {
+function persistGuestState(affectedTableNums) {
     sortGuestArraysBySeat();
-    suppressGuestRemoteRenderCount = 2;
-    return database.ref().update({
-        wedding_guests: allGuests,
-        unassigned_guests: unassignedPool
-    }).catch(err => {
+    const updates = {};
+    if (guestPersistPoolDirty) {
+        updates.unassigned_guests = unassignedPool;
+    }
+    const nums = affectedTableNums?.length
+        ? [...new Set(affectedTableNums.map(String))]
+        : getTableSettingKeys();
+    nums.forEach(num => {
+        const idx = parseInt(num, 10);
+        if (!idx) return;
+        const list = allGuests[idx];
+        updates[`wedding_guests/${idx}`] = list && list.length ? list : null;
+    });
+
+    suppressGuestRemoteRenderCount = guestPersistPoolDirty ? 2 : 1;
+    return database.ref().update(updates).catch(err => {
         suppressGuestRemoteRenderCount = 0;
         console.warn('賓客狀態同步失敗:', err);
         throw err;
     });
+}
+
+let guestPersistQueue = Promise.resolve();
+
+function schedulePersistGuestState(affectedTableNums, poolDirty) {
+    affectedTableNums.forEach(num => guestPersistPendingTables.add(String(num)));
+    if (poolDirty) guestPersistPoolDirty = true;
+    guestPersistQueue = guestPersistQueue.then(() => {
+        const tables = [...guestPersistPendingTables];
+        const poolDirtyNow = guestPersistPoolDirty;
+        guestPersistPendingTables.clear();
+        guestPersistPoolDirty = false;
+        if (!tables.length && !poolDirtyNow) return;
+        return persistGuestState(tables.length ? tables : getTableSettingKeys());
+    });
+    return guestPersistQueue;
+}
+
+function flushGuestPersist() {
+    return schedulePersistGuestState([], false);
 }
 
 function fitGuestNameFontsInTable(tableNum) {
@@ -1754,8 +1798,18 @@ function updateTableGuestDisplay(tableNum) {
     return true;
 }
 
-function applyGuestMoveUI(tableNums) {
-    renderSidebar();
+function getGuestSideLabel(guest) {
+    return guest?.side === '女方' ? '女方' : '男方';
+}
+
+function applyGuestMoveUI(tableNums, { poolChanged = false, poolSides = null } = {}) {
+    if (poolChanged) {
+        if (poolSides && poolSides.length) {
+            [...new Set(poolSides)].forEach(side => renderSidebarSide(side));
+        } else {
+            renderSidebar();
+        }
+    }
     updateGlobalStats();
     let needsFullRender = false;
     [...new Set(tableNums.map(String))].forEach(num => {
@@ -1764,9 +1818,9 @@ function applyGuestMoveUI(tableNums) {
     if (needsFullRender) renderCanvasTables();
 }
 
-function commitGuestStateChange(affectedTableNums) {
-    applyGuestMoveUI(affectedTableNums);
-    return persistGuestState();
+function commitGuestStateChange(affectedTableNums, { poolChanged = false, poolSides = null } = {}) {
+    applyGuestMoveUI(affectedTableNums, { poolChanged, poolSides });
+    return schedulePersistGuestState(affectedTableNums, poolChanged);
 }
 
 function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
@@ -1791,12 +1845,14 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
 
     if (!movingGuestObj) return;
 
+    let bumpedToPool = null;
     const occupiedIdx = allGuests[toTableIdx].findIndex(g => g && g.sort === targetSortNum);
     if (occupiedIdx !== -1) {
         const bumpedGuest = allGuests[toTableIdx][occupiedIdx];
         if (fromTable === 'POOL') {
             bumpedGuest.sort = 99;
             unassignedPool.push(bumpedGuest);
+            bumpedToPool = bumpedGuest;
         } else {
             const fromTableIdx = parseInt(fromTable, 10);
             bumpedGuest.sort = seatIndex + 1;
@@ -1810,7 +1866,16 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
 
     const affected = new Set([String(toTableNum)]);
     if (fromTable !== 'POOL') affected.add(String(fromTable));
-    commitGuestStateChange(Array.from(affected));
+
+    const poolChanged = fromTable === 'POOL';
+    const poolSides = poolChanged
+        ? [
+            getGuestSideLabel(movingGuestObj),
+            ...(bumpedToPool ? [getGuestSideLabel(bumpedToPool)] : [])
+        ]
+        : null;
+
+    commitGuestStateChange(Array.from(affected), { poolChanged, poolSides });
 }
 
 function moveGuestToPool(data) {
@@ -1827,7 +1892,10 @@ function moveGuestToPool(data) {
     if (!unassignedPool) unassignedPool = [];
     unassignedPool.push(movingGuestObj);
 
-    commitGuestStateChange([String(fromTable)]);
+    commitGuestStateChange([String(fromTable)], {
+        poolChanged: true,
+        poolSides: [getGuestSideLabel(movingGuestObj)]
+    });
 }
 
 function resolvePointerDrop(clientX, clientY, data) {
@@ -2154,15 +2222,22 @@ function renderSidePool(container, groups, count, emptyMessage) {
 }
 
 // 🎯 核心渲染更新：緊貼式上下結構
-function renderSidebar() {
-    const maleContainer = document.getElementById('pool-male');
-    const femaleContainer = document.getElementById('pool-female');
-    if (!maleContainer || !femaleContainer) return;
+function renderSidebarSide(side) {
+    const isMale = side === '男方';
+    const container = document.getElementById(isMale ? 'pool-male' : 'pool-female');
+    if (!container) return;
+    const data = collectPoolBySide(side);
+    renderSidePool(
+        container,
+        data.groups,
+        data.count,
+        isMale ? '🎉 男方已全數安排' : '🎉 女方已全數安排'
+    );
+}
 
-    const male = collectPoolBySide('男方');
-    const female = collectPoolBySide('女方');
-    renderSidePool(maleContainer, male.groups, male.count, '🎉 男方已全數安排');
-    renderSidePool(femaleContainer, female.groups, female.count, '🎉 女方已全數安排');
+function renderSidebar() {
+    renderSidebarSide('男方');
+    renderSidebarSide('女方');
 }
 
 function renderGroupData(groups, container) {
@@ -2371,7 +2446,11 @@ function removeGuestFromSeatAction() {
         if (!unassignedPool) unassignedPool = [];
         unassignedPool.push(guestObj);
 
-        commitGuestStateChange([String(tableNum)]).then(() => closeGuestModal());
+        commitGuestStateChange([String(tableNum)], {
+            poolChanged: true,
+            poolSides: [getGuestSideLabel(guestObj)]
+        });
+        closeGuestModal();
     }
 }
 
