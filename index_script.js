@@ -76,11 +76,61 @@ function guestTagSpans(guest) {
     return tags.map(t => `<span class="px-2 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-700">${t}</span>`).join('');
 }
 
-function guestMatchesKeyword(guest, keyword) {
+function parseSearchTokens(keyword) {
+    return keyword.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function getGuestSearchFields(guest) {
     const name = (guest.name || '').toLowerCase();
     const side = (guest.side || '').toLowerCase();
-    const tags = normalizeGuestTags(guest.group);
-    return name.includes(keyword) || side.includes(keyword) || tags.some(t => t.toLowerCase().includes(keyword));
+    const tags = normalizeGuestTags(guest.group).map(t => t.toLowerCase());
+    const fields = new Set();
+    [name, side, ...tags].filter(Boolean).forEach(field => {
+        fields.add(field);
+        const compact = field.replace(/\s+/g, '');
+        if (compact) fields.add(compact);
+    });
+    return [...fields];
+}
+
+function fieldMatchesPart(field, part) {
+    if (!part) return false;
+    if (field.includes(part)) return true;
+    const compactField = field.replace(/\s+/g, '');
+    const compactPart = part.replace(/\s+/g, '');
+    return compactPart.length > 0 && compactField.includes(compactPart);
+}
+
+function partMatchesAnyField(part, fields) {
+    return fields.some(field => fieldMatchesPart(field, part));
+}
+
+function queryMatchesFieldsContinuous(query, fields) {
+    function matchFrom(pos) {
+        if (pos === query.length) return true;
+        for (let len = query.length - pos; len >= 1; len--) {
+            const part = query.slice(pos, pos + len);
+            if (partMatchesAnyField(part, fields) && matchFrom(pos + len)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    return matchFrom(0);
+}
+
+function guestMatchesKeyword(guest, keyword) {
+    const query = keyword.trim().toLowerCase();
+    if (!query) return false;
+
+    const fields = getGuestSearchFields(guest);
+    const tokens = parseSearchTokens(query);
+
+    if (tokens.length > 1) {
+        return tokens.every(token => partMatchesAnyField(token, fields));
+    }
+
+    return partMatchesAnyField(query, fields) || queryMatchesFieldsContinuous(query, fields);
 }
 
 function normalizeTableSettings(raw) {
