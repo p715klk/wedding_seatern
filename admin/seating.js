@@ -1633,12 +1633,140 @@ function sortGuestArraysBySeat() {
     });
 }
 
+let suppressGuestRemoteRenderCount = 0;
+
 function persistGuestState() {
     sortGuestArraysBySeat();
+    suppressGuestRemoteRenderCount = 2;
     return database.ref().update({
         wedding_guests: allGuests,
         unassigned_guests: unassignedPool
+    }).catch(err => {
+        suppressGuestRemoteRenderCount = 0;
+        console.warn('賓客狀態同步失敗:', err);
+        throw err;
     });
+}
+
+function fitGuestNameFontsInTable(tableNum) {
+    const table = canvas.querySelector(`.draggable-table[data-table="${tableNum}"]`);
+    if (!table) return;
+    table.querySelectorAll('.guest-seat-circle').forEach(circle => {
+        const ratio = measureGuestNameFontRatio(circle);
+        circle.style.setProperty('--name-font-ratio', ratio.toFixed(4));
+    });
+}
+
+function getTableSeatSlotsArray(tableNum, maxSeats) {
+    const idx = parseInt(tableNum, 10);
+    const guestsInTable = allGuests[idx] || [];
+    const seatSlotsArray = new Array(maxSeats).fill(null);
+    guestsInTable.forEach(g => {
+        if (g && g.name && g.sort >= 1 && g.sort <= maxSeats) {
+            seatSlotsArray[g.sort - 1] = g;
+        }
+    });
+    const filled = guestsInTable.filter(g => g && g.name).length;
+    return { seatSlotsArray, filled };
+}
+
+function appendTablePlateGuestUI(tablePlate, tableNum, settings) {
+    const maxSeats = settings.max_seats || 12;
+    const { seatSlotsArray, filled } = getTableSeatSlotsArray(tableNum, maxSeats);
+    const seatLayout = getSeatLayout(maxSeats);
+    tablePlate.style.setProperty('--guest-size', `${seatLayout.guestSize}px`);
+
+    for (let i = 0; i < maxSeats; i++) {
+        const seatSlot = document.createElement('div');
+        const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
+        const x = PLATE_CENTER + seatLayout.radius * Math.cos(angle);
+        const y = PLATE_CENTER + seatLayout.radius * Math.sin(angle);
+
+        seatSlot.style.left = `calc(${x}px * var(--zoom))`;
+        seatSlot.style.top = `calc(${y}px * var(--zoom))`;
+        seatSlot.dataset.tableNum = tableNum;
+        seatSlot.dataset.seatIndex = i;
+
+        const guest = seatSlotsArray[i];
+
+        if (guest) {
+            const sideClass = guest.side === '女方' ? 'side-female' : 'side-male';
+            seatSlot.className = `seat-slot guest-seat-circle ${sideClass}`;
+            seatSlot.innerHTML = `<span class="${getGuestNameTextClass(guest.name)}" title="${guest.name}">${formatGuestDisplayName(guest.name)}</span>`;
+
+            bindGuestTap(seatSlot, () => {
+                openGuestModal(guest, tableNum, i);
+            });
+
+            const seatDragData = () => ({
+                fromTable: tableNum,
+                seatIndex: i,
+                name: guest.name
+            });
+            if (IS_TOUCH_DEVICE) {
+                setupTouchDrag(seatSlot, seatDragData);
+            } else {
+                setupDesktopGuestDrag(seatSlot, seatDragData, { pointerDown: true });
+            }
+        } else {
+            seatSlot.className = 'seat-slot seat-empty';
+            seatSlot.innerHTML = '<span>+</span>';
+        }
+
+        seatSlot.setAttribute('ondragover', 'allowDrop(event)');
+        seatSlot.setAttribute('ondrop', `handleDropOnSpecificSeat(event, "${tableNum}", ${i})`);
+
+        tablePlate.appendChild(seatSlot);
+    }
+
+    tablePlate.insertAdjacentHTML('beforeend', buildHubRingSVG(filled, maxSeats));
+
+    const tableLabel = (settings.label || '').trim();
+    const hubCenter = document.createElement('div');
+    hubCenter.className = 'hub-center';
+    hubCenter.innerHTML = [
+        `<span class="hub-title">Table ${tableNum}</span>`,
+        tableLabel ? `<span class="hub-category">${escapeHtml(tableLabel)}</span>` : '',
+        `<span class="hub-num">${filled}</span>`
+    ].join('');
+    if (IS_TOUCH_DEVICE) {
+        bindGuestTap(hubCenter, () => openSettingsModal(tableNum, maxSeats));
+    } else {
+        const hubTitle = hubCenter.querySelector('.hub-title');
+        if (hubTitle) {
+            bindGuestTap(hubTitle, () => openSettingsModal(tableNum, maxSeats));
+        }
+    }
+    tablePlate.appendChild(hubCenter);
+}
+
+function updateTableGuestDisplay(tableNum) {
+    const tableWrapper = canvas.querySelector(`.draggable-table[data-table="${tableNum}"]`);
+    if (!tableWrapper) return false;
+    const settings = tableSettings[tableNum];
+    if (!settings) return false;
+    const tablePlate = tableWrapper.querySelector('.table-plate');
+    if (!tablePlate) return false;
+
+    tablePlate.querySelectorAll('.seat-slot, .hub-ring, .hub-center').forEach(el => el.remove());
+    appendTablePlateGuestUI(tablePlate, tableNum, settings);
+    requestAnimationFrame(() => fitGuestNameFontsInTable(tableNum));
+    return true;
+}
+
+function applyGuestMoveUI(tableNums) {
+    renderSidebar();
+    updateGlobalStats();
+    let needsFullRender = false;
+    [...new Set(tableNums.map(String))].forEach(num => {
+        if (!updateTableGuestDisplay(num)) needsFullRender = true;
+    });
+    if (needsFullRender) renderCanvasTables();
+}
+
+function commitGuestStateChange(affectedTableNums) {
+    applyGuestMoveUI(affectedTableNums);
+    return persistGuestState();
 }
 
 function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
@@ -1680,7 +1808,9 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
     movingGuestObj.sort = targetSortNum;
     allGuests[toTableIdx].push(movingGuestObj);
 
-    persistGuestState();
+    const affected = new Set([String(toTableNum)]);
+    if (fromTable !== 'POOL') affected.add(String(fromTable));
+    commitGuestStateChange(Array.from(affected));
 }
 
 function moveGuestToPool(data) {
@@ -1697,7 +1827,7 @@ function moveGuestToPool(data) {
     if (!unassignedPool) unassignedPool = [];
     unassignedPool.push(movingGuestObj);
 
-    persistGuestState();
+    commitGuestStateChange([String(fromTable)]);
 }
 
 function resolvePointerDrop(clientX, clientY, data) {
@@ -1929,6 +2059,10 @@ setGlobalStatsMessage('連線中...');
 database.ref('wedding_guests').on('value', (snapshot) => {
     allGuests = snapshot.val() || [];
     markSeatingPartialReady('guests');
+    if (suppressGuestRemoteRenderCount > 0) {
+        suppressGuestRemoteRenderCount--;
+        return;
+    }
     runRender();
 }, err => {
     console.error('wedding_guests 讀取失敗:', err);
@@ -1938,6 +2072,10 @@ database.ref('wedding_guests').on('value', (snapshot) => {
 database.ref('unassigned_guests').on('value', (snapshot) => {
     unassignedPool = snapshot.val() || [];
     markSeatingPartialReady('pool');
+    if (suppressGuestRemoteRenderCount > 0) {
+        suppressGuestRemoteRenderCount--;
+        return;
+    }
     runRender();
 }, err => console.error('unassigned_guests 讀取失敗:', err));
 
@@ -2068,19 +2206,8 @@ function renderCanvasTables() {
     document.querySelectorAll('.draggable-table').forEach(el => el.remove());
 
     sortedTableNums.forEach(tableNum => {
-        const idx = parseInt(tableNum, 10);
         const settings = tableSettings[tableNum];
         if (!settings) return;
-        const maxSeats = settings.max_seats || 12;
-        const guestsInTable = allGuests[idx] || [];
-        const filled = guestsInTable.filter(g => g && g.name).length;
-
-        const seatSlotsArray = new Array(maxSeats).fill(null);
-        guestsInTable.forEach(g => {
-            if (g && g.name && g.sort >= 1 && g.sort <= maxSeats) {
-                seatSlotsArray[g.sort - 1] = g;
-            }
-        });
 
         const tableWrapper = document.createElement('div');
         tableWrapper.className = "draggable-table";
@@ -2114,75 +2241,11 @@ function renderCanvasTables() {
             tablePlate.ondblclick = (e) => {
                 e.stopPropagation();
                 cancelTableDrag();
-                openSettingsModal(tableNum, maxSeats);
+                openSettingsModal(tableNum, settings.max_seats || 12);
             };
         }
 
-        const seatLayout = getSeatLayout(maxSeats);
-        tablePlate.style.setProperty('--guest-size', `${seatLayout.guestSize}px`);
-
-        for (let i = 0; i < maxSeats; i++) {
-            const seatSlot = document.createElement('div');
-            const angle = (i * 2 * Math.PI) / maxSeats - Math.PI / 2;
-            const x = PLATE_CENTER + seatLayout.radius * Math.cos(angle);
-            const y = PLATE_CENTER + seatLayout.radius * Math.sin(angle);
-
-            seatSlot.style.left = `calc(${x}px * var(--zoom))`;
-            seatSlot.style.top = `calc(${y}px * var(--zoom))`;
-            seatSlot.dataset.tableNum = tableNum;
-            seatSlot.dataset.seatIndex = i;
-
-            const guest = seatSlotsArray[i];
-
-            if (guest) {
-                const sideClass = guest.side === '女方' ? 'side-female' : 'side-male';
-                seatSlot.className = `seat-slot guest-seat-circle ${sideClass}`;
-                seatSlot.innerHTML = `<span class="${getGuestNameTextClass(guest.name)}" title="${guest.name}">${formatGuestDisplayName(guest.name)}</span>`;
-
-                bindGuestTap(seatSlot, () => {
-                    openGuestModal(guest, tableNum, i);
-                });
-
-                const seatDragData = () => ({
-                    fromTable: tableNum,
-                    seatIndex: i,
-                    name: guest.name
-                });
-                if (IS_TOUCH_DEVICE) {
-                    setupTouchDrag(seatSlot, seatDragData);
-                } else {
-                    setupDesktopGuestDrag(seatSlot, seatDragData, { pointerDown: true });
-                }
-            } else {
-                seatSlot.className = 'seat-slot seat-empty';
-                seatSlot.innerHTML = '<span>+</span>';
-            }
-
-            seatSlot.setAttribute('ondragover', 'allowDrop(event)');
-            seatSlot.setAttribute('ondrop', `handleDropOnSpecificSeat(event, "${tableNum}", ${i})`);
-
-            tablePlate.appendChild(seatSlot);
-        }
-
-        tablePlate.insertAdjacentHTML('beforeend', buildHubRingSVG(filled, maxSeats));
-
-        const tableLabel = (settings.label || '').trim();
-        const hubCenter = document.createElement('div');
-        hubCenter.className = 'hub-center';
-        hubCenter.innerHTML = [
-            `<span class="hub-title">Table ${tableNum}</span>`,
-            tableLabel ? `<span class="hub-category">${escapeHtml(tableLabel)}</span>` : '',
-            `<span class="hub-num">${filled}</span>`
-        ].join('');
-        if (IS_TOUCH_DEVICE) {
-            bindGuestTap(hubCenter, () => openSettingsModal(tableNum, maxSeats));
-        } else {
-            const hubTitle = hubCenter.querySelector('.hub-title');
-            if (hubTitle) {
-                bindGuestTap(hubTitle, () => openSettingsModal(tableNum, maxSeats));
-            }
-        }
-        tablePlate.appendChild(hubCenter);
+        appendTablePlateGuestUI(tablePlate, tableNum, settings);
 
         tableWrapper.appendChild(tablePlate);
         canvas.appendChild(tableWrapper);
@@ -2308,7 +2371,7 @@ function removeGuestFromSeatAction() {
         if (!unassignedPool) unassignedPool = [];
         unassignedPool.push(guestObj);
 
-        persistGuestState().then(() => closeGuestModal());
+        commitGuestStateChange([String(tableNum)]).then(() => closeGuestModal());
     }
 }
 
