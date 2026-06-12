@@ -55,18 +55,19 @@ html, body {
     padding: 0.25rem;
 }
 
-.floor-table-label {
-    font-size: 0.65rem;
+#floor-plan .floor-table-label {
+    font-size: 10.4px;
     line-height: 1.15;
     white-space: nowrap;
     pointer-events: none;
 }
 
-.floor-table-ring {
+#floor-plan .floor-table-ring {
     width: 2.85rem;
     height: 2.85rem;
     flex-shrink: 0;
-    font-size: 0.8rem;
+    font-size: 12px;
+    line-height: 1;
     pointer-events: none;
 }
 
