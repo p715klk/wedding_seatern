@@ -103,7 +103,7 @@ function normalizeTableSettings(raw) {
 
 function createTableCard(num) {
     const div = document.createElement('div');
-    div.className = 'floor-cell-table bg-white p-1 sm:p-2 rounded-xl shadow-md border-2 border-gray-200 flex flex-col justify-between items-center cursor-pointer hover:border-red-400 transition active:scale-95';
+    div.className = 'floor-cell-table bg-white rounded-xl shadow-md border-2 border-gray-200 cursor-pointer hover:border-red-400 transition active:scale-95';
     div.id = `table-card-${num}`;
     div.setAttribute('role', 'button');
     div.setAttribute('tabindex', '0');
