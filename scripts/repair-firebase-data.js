@@ -3,6 +3,7 @@
  * - table_settings：由 array+null 轉成 object
  * - floor_layout：還原簽到頁正確排位
  */
+/*
 const https = require('https');
 
 const BASE = 'https://wedding-seatern-default-rtdb.asia-southeast1.firebasedatabase.app';
@@ -75,3 +76,4 @@ main().catch(err => {
     console.error('❌', err.message);
     process.exit(1);
 });
+*/
