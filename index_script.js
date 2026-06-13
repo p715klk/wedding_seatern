@@ -54,7 +54,7 @@ let currentFloorLayoutJson = '';
 const floorPlan = document.getElementById('floor-plan');
 const floorPlanWrap = document.getElementById('floor-plan-wrap');
 const floorPlanHint = document.getElementById('floor-plan-hint');
-const TABLE_RING_BASE = 'floor-table-ring rounded-full border-4 flex items-center justify-center font-black';
+const TABLE_RING_BASE = 'floor-table-ring rounded-full border-4 flex items-center justify-center font-semibold';
 
 function normalizeGuestTags(val) {
     if (!val) return [];
