@@ -1667,35 +1667,40 @@ function normalizeUnassignedPool(raw) {
 function sanitizeGuestStateBeforePersist() {
     unassignedPool = normalizeUnassignedPool(unassignedPool);
 
-    const poolNames = new Set();
-    const dedupedPool = [];
-    unassignedPool.forEach(g => {
-        if (!g?.name || poolNames.has(g.name)) return;
-        poolNames.add(g.name);
-        g.sort = 99;
-        dedupedPool.push(g);
-    });
-    unassignedPool = dedupedPool;
-
-    const stripTableList = (list) => {
+    const tableAssignedNames = new Set();
+    const dedupeTableList = (list) => {
         if (!Array.isArray(list)) return [];
         const seen = new Set();
         return list.filter(g => {
             if (!g?.name) return false;
-            if (poolNames.has(g.name)) return false;
             if (seen.has(g.name)) return false;
             seen.add(g.name);
+            const sort = parseInt(g.sort, 10);
+            if (!isNaN(sort) && sort >= 1 && sort !== 99) {
+                tableAssignedNames.add(g.name);
+            }
             return true;
         });
     };
 
     if (Array.isArray(allGuests)) {
-        allGuests = allGuests.map(stripTableList);
+        allGuests = allGuests.map(dedupeTableList);
     } else if (allGuests && typeof allGuests === 'object') {
         Object.keys(allGuests).forEach(key => {
-            allGuests[key] = stripTableList(allGuests[key]);
+            allGuests[key] = dedupeTableList(allGuests[key]);
         });
     }
+
+    const poolNames = new Set();
+    const dedupedPool = [];
+    unassignedPool.forEach(g => {
+        if (!g?.name || poolNames.has(g.name)) return;
+        if (tableAssignedNames.has(g.name)) return;
+        poolNames.add(g.name);
+        g.sort = 99;
+        dedupedPool.push(g);
+    });
+    unassignedPool = dedupedPool;
 }
 
 function persistGuestState(affectedTableNums, poolDirty = false) {
@@ -1737,7 +1742,10 @@ function schedulePersistGuestState(affectedTableNums, poolDirty) {
         guestPersistPendingTables.clear();
         guestPersistPoolDirty = false;
         if (!tables.length && !poolDirtyNow) return;
-        return persistGuestState(tables.length ? tables : getTableSettingKeys(), poolDirtyNow);
+        const tablesToPersist = tables.length ? tables : getTableSettingKeys();
+        return persistGuestState(tablesToPersist, poolDirtyNow).then(() => {
+            applyGuestMoveUI(tablesToPersist, { poolChanged: poolDirtyNow });
+        });
     });
     return guestPersistQueue;
 }
@@ -1888,8 +1896,14 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
 
     if (fromTable === 'POOL') {
         unassignedPool = normalizeUnassignedPool(unassignedPool);
-        movingGuestObj = unassignedPool[index];
-        if (movingGuestObj) unassignedPool.splice(index, 1);
+        let poolIndex = typeof index === 'number' ? index : -1;
+        if (poolIndex < 0 || poolIndex >= unassignedPool.length || !unassignedPool[poolIndex]?.name) {
+            poolIndex = unassignedPool.findIndex(g => g?.name && data.name && g.name === data.name);
+        }
+        if (poolIndex >= 0) {
+            movingGuestObj = unassignedPool[poolIndex];
+            unassignedPool.splice(poolIndex, 1);
+        }
     } else {
         const fromTableIdx = parseInt(fromTable, 10);
         const foundIdx = findGuestBySeat(fromTableIdx, seatIndex);
