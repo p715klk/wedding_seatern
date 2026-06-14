@@ -105,3 +105,31 @@ let activeSelectElement = null;
 let activeColumnKey = null; 
 let sortableInstance = null;
 let csvImportInProgress = false;
+let adminHasUnsavedChanges = false;
+let pendingLeaveHref = null;
+
+function isAdminPageDirty() {
+    return adminHasUnsavedChanges;
+}
+
+function markAdminDirty() {
+    adminHasUnsavedChanges = true;
+    updateAdminUnsavedIndicator();
+}
+
+function markAdminClean() {
+    adminHasUnsavedChanges = false;
+    updateAdminUnsavedIndicator();
+}
+
+function updateAdminUnsavedIndicator() {
+    const btn = document.getElementById('btn-save-all');
+    if (!btn) return;
+    if (adminHasUnsavedChanges) {
+        btn.classList.add('ring-2', 'ring-yellow-400', 'ring-offset-1');
+        btn.title = '有未儲存的改動，請按此儲存';
+    } else {
+        btn.classList.remove('ring-2', 'ring-yellow-400', 'ring-offset-1');
+        btn.title = '';
+    }
+}

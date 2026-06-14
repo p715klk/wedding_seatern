@@ -188,6 +188,7 @@ function handleTagAdd(selectEl, columnKey) {
     const row = selectEl.closest('tr');
     insertTagChipBeforeSelect(row, columnKey, val);
     refreshTagAddSelect(row, columnKey);
+    markAdminDirty();
 }
 
 function collectGuestsFromDOM() {
@@ -251,6 +252,7 @@ function closeDeleteTagDialog(isConfirm) {
             if (idx !== -1) {
                 pool.splice(idx, 1);
                 refreshAllTagAddSelects(activeColumnKey);
+                markAdminDirty();
                 alert(`✅ 已從標籤清單移除「${tag}」\n請記得按「儲存變更」同步至 Firebase。`);
             }
         }
@@ -264,6 +266,7 @@ function removeTagFromRow(btn, columnKey) {
     const row = btn.closest('tr');
     btn.closest('.tag-chip').remove();
     refreshTagAddSelect(row, columnKey);
+    markAdminDirty();
 }
 
 function collectGuestFromRow(row) {
@@ -433,6 +436,7 @@ function reinitTableSortable() {
             ghostClass: 'sortable-ghost',
             onEnd: function () {
                 recalculateSortNumbersFromDOM();
+                markAdminDirty();
             }
         });
     }
@@ -473,7 +477,8 @@ function addNewGuestRow() {
     `;
 
     tbody.appendChild(tr);
-    scrollContainer.scrollTop = scrollContainer.scrollHeight; 
+    scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    markAdminDirty();
 }
 
 function closeCustomCategoryDialog(isConfirm) {
@@ -489,6 +494,7 @@ function closeCustomCategoryDialog(isConfirm) {
             const row = activeSelectElement.closest('tr');
             insertTagChipBeforeSelect(row, activeColumnKey, newCat);
             refreshTagAddSelect(row, activeColumnKey);
+            markAdminDirty();
         }
     }
     activeSelectElement = null;
@@ -498,6 +504,7 @@ function closeCustomCategoryDialog(isConfirm) {
 function deleteRowAction(btn) {
     btn.closest('tr').remove();
     recalculateSortNumbersFromDOM();
+    markAdminDirty();
 }
 
 function getOccupiedSeatsOnTable(tableNum, excludeRow = null) {
@@ -607,11 +614,67 @@ function recalculateSortNumbersFromDOM() {
     reassignSeatsByDomOrderPerTable();
 }
 
+function openLeavePageDialog(href) {
+    pendingLeaveHref = href || null;
+    document.getElementById('leave-page-dialog-overlay').classList.remove('hidden');
+}
+
+function closeLeavePageDialog() {
+    document.getElementById('leave-page-dialog-overlay').classList.add('hidden');
+    pendingLeaveHref = null;
+}
+
+function confirmLeaveAdminPage(action) {
+    const href = pendingLeaveHref;
+    closeLeavePageDialog();
+    if (action === 'stay') return;
+
+    if (action === 'discard') {
+        markAdminClean();
+        if (href) window.location.href = href;
+        return;
+    }
+
+    if (action === 'save') {
+        saveAllToFirebase({ reloadAfterSave: false })
+            .then(() => {
+                markAdminClean();
+                if (href) window.location.href = href;
+                else alert('✅ 已儲存變更');
+            })
+            .catch(() => {});
+    }
+}
+
+function setupAdminLeaveGuard() {
+    if (!tbody) return;
+
+    tbody.addEventListener('input', markAdminDirty);
+    tbody.addEventListener('change', markAdminDirty);
+
+    document.addEventListener('click', (e) => {
+        const link = e.target.closest('a[href]');
+        if (!link || !isAdminPageDirty()) return;
+        const href = link.getAttribute('href');
+        if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+        if (link.target === '_blank') return;
+        e.preventDefault();
+        openLeavePageDialog(link.href);
+    }, true);
+
+    window.addEventListener('beforeunload', (e) => {
+        if (!isAdminPageDirty()) return;
+        e.preventDefault();
+        e.returnValue = '';
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     tbody = document.getElementById('excel-tbody');
     scrollContainer = document.getElementById('table-scroll-container');
 
     reinitTableSortable();
+    setupAdminLeaveGuard();
     loadFirebaseData();
     startAdminRealtimeSync();
 });

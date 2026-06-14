@@ -121,6 +121,7 @@ function processFirebaseData(weddingGuests, unassignedGuests) {
 
     renderThead();   // 呼叫 UI 模組生成表頭
     renderDOMRows(); // 呼叫 UI 模組渲染行數
+    markAdminClean();
 }
 
 // ==========================================
@@ -171,6 +172,7 @@ function saveAllToFirebase(options = {}) {
         database.ref('wedding_guests').set(newWeddingGuests),
         database.ref('unassigned_guests').set(newUnassignedGuests)
     ]).then(() => {
+        markAdminClean();
         if (reloadAfterSave) return loadFirebaseData(true);
     }).then(() => {
         if (successMessage) alert(successMessage);
@@ -333,11 +335,12 @@ function importCSVAction() {
 }
 
 function shouldAutoReloadAdminRows() {
+    if (isAdminPageDirty()) return false;
     const active = document.activeElement;
     if (!active) return true;
     const tag = active.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return false;
-    return !active.closest('#custom-dialog-overlay, #delete-tag-dialog-overlay');
+    return !active.closest('#custom-dialog-overlay, #delete-tag-dialog-overlay, #leave-page-dialog-overlay');
 }
 
 function startAdminRealtimeSync() {
