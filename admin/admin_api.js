@@ -273,18 +273,232 @@ function parseImportedGuestFromCSVRow(parts, colMap) {
 
     const tableRaw = clean(colMap.table);
     const seatRaw = clean(colMap.seat);
+    const seatReleased = /已釋放|released/i.test(seatRaw);
     const tableNum = parseInt(tableRaw, 10);
     const seatNum = parseInt(seatRaw, 10);
     const hasTable = tableRaw !== '' && !isNaN(tableNum) && tableNum >= 1;
-    const hasSeat = seatRaw !== '' && !isNaN(seatNum) && seatNum >= 1;
+    const hasSeat = !seatReleased && seatRaw !== '' && !isNaN(seatNum) && seatNum >= 1;
 
     return {
         name,
         side,
         table: hasTable ? tableNum : '',
         sort: hasTable ? (hasSeat ? seatNum : 1) : 99,
-        group: normalizeTags(clean(colMap.tags))
+        group: normalizeTags(clean(colMap.tags)),
+        seatReleased
     };
+}
+
+function diffGuestPlacement(before, after) {
+    const changes = [];
+    const beforeTable = before.table === '' || before.table == null ? '未分配' : `第 ${before.table} 桌`;
+    const afterTable = after.table === '' || after.table == null ? '未分配' : `第 ${after.table} 桌`;
+    if (String(before.table) !== String(after.table)) {
+        changes.push(`枱位 ${beforeTable} → ${afterTable}`);
+    }
+    const beforeSeat = before.isCanceled ? '已釋放' : String(before.sort || 1);
+    const afterSeat = after.isCanceled ? '已釋放' : String(after.sort || 1);
+    if (before.table && after.table && beforeSeat !== afterSeat) {
+        changes.push(`座位 ${beforeSeat} → ${afterSeat}`);
+    }
+    return changes;
+}
+
+function mergeImportedOverExisting(existing, incoming) {
+    const merged = {
+        ...existing,
+        name: incoming.name,
+        side: incoming.side,
+        group: [...incoming.group]
+    };
+
+    if (existing.isCanceled && incoming.seatReleased) {
+        merged.table = incoming.table !== '' && incoming.table != null ? incoming.table : existing.table;
+        merged.sort = existing.preservedSort ?? existing.sort;
+        merged.isCanceled = true;
+        merged.preservedSort = existing.preservedSort ?? existing.sort;
+    } else {
+        merged.table = incoming.table;
+        merged.sort = incoming.sort;
+        merged.isCanceled = existing.isCanceled;
+        merged.preservedSort = existing.preservedSort;
+    }
+
+    return merged;
+}
+
+function findDuplicateImportKeys(importedGuests) {
+    const seen = new Map();
+    const duplicates = [];
+    importedGuests.forEach((guest, index) => {
+        const key = guestIdentityKey(guest);
+        if (seen.has(key)) {
+            duplicates.push({
+                row: index + 1,
+                name: guest.name,
+                side: guest.side,
+                tags: formatGuestTagsLabel(guest.group)
+            });
+        } else {
+            seen.set(key, index);
+        }
+    });
+    return duplicates;
+}
+
+function buildCSVImportPlan(importedGuests, existingGuests, mode) {
+    const existing = existingGuests.map(normalizeGuestForList);
+    const importedRaw = importedGuests.map(normalizeGuestForList);
+    const duplicates = findDuplicateImportKeys(importedRaw);
+    const imported = dedupeImportedGuestsLastWins(importedRaw);
+    const existingByKey = new Map();
+
+    existing.forEach((guest) => {
+        existingByKey.set(guestIdentityKey(guest), guest);
+    });
+
+    const importedKeys = new Set();
+    const added = [];
+    const updated = [];
+    const unchanged = [];
+    const resultByKey = new Map();
+
+    if (mode === 'merge') {
+        existing.forEach((guest) => {
+            resultByKey.set(guestIdentityKey(guest), { ...guest });
+        });
+    }
+
+    imported.forEach((incoming) => {
+        const key = guestIdentityKey(incoming);
+        importedKeys.add(key);
+        const before = existingByKey.get(key);
+
+        if (!before) {
+            added.push(incoming);
+            resultByKey.set(key, { ...incoming });
+            return;
+        }
+
+        const merged = mergeImportedOverExisting(before, incoming);
+        const changes = diffGuestPlacement(before, merged);
+        if (changes.length) {
+            updated.push({ before, after: merged, changes });
+        } else {
+            unchanged.push(merged);
+        }
+        resultByKey.set(key, merged);
+    });
+
+    const kept = mode === 'merge'
+        ? existing.filter((guest) => !importedKeys.has(guestIdentityKey(guest)))
+        : [];
+    const removed = mode === 'replace'
+        ? existing.filter((guest) => !importedKeys.has(guestIdentityKey(guest)))
+        : [];
+
+    const resultGuests = mode === 'replace'
+        ? sortGuestsListByTableAndSeat(imported.map((guest) => ({ ...guest })))
+        : sortGuestsListByTableAndSeat([...resultByKey.values()].map((guest) => ({ ...guest })));
+
+    const assignedCount = resultGuests.filter((g) => g.table !== '' && g.table != null).length;
+
+    return {
+        mode,
+        resultGuests,
+        duplicates,
+        preview: { added, updated, unchanged, kept, removed },
+        stats: {
+            csvTotal: imported.length,
+            existingTotal: existing.length,
+            resultTotal: resultGuests.length,
+            added: added.length,
+            updated: updated.length,
+            unchanged: unchanged.length,
+            kept: kept.length,
+            removed: removed.length,
+            assigned: assignedCount,
+            unassigned: resultGuests.length - assignedCount
+        }
+    };
+}
+
+function parseCSVFileContent(text) {
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((line) => line.trim());
+    if (lines.length === 0) {
+        return { error: '❌ CSV 檔案是空的。' };
+    }
+
+    const headerParts = parseCSVLine(lines[0].trim());
+    let colMap = buildCSVColumnMap(headerParts);
+    const firstDataParts = lines.length > 1 ? parseCSVLine(lines[1].trim()) : [];
+
+    if (colMap.name == null) {
+        const looksLikeNewExport = firstDataParts.length >= 4
+            && !isNaN(parseInt(firstDataParts[0], 10))
+            && !isNaN(parseInt(firstDataParts[1], 10));
+        if (looksLikeNewExport) {
+            colMap = { seq: 0, table: 1, seat: 2, name: 3, side: 4, tags: 5 };
+        } else {
+            colMap = { name: 0, side: 1, tags: 2, table: 3 };
+        }
+    }
+
+    const dataStartIndex = colMap.name != null && buildCSVColumnMap(headerParts).name != null ? 1 : 0;
+    const importedGuests = [];
+
+    for (let i = dataStartIndex; i < lines.length; i++) {
+        const parts = parseCSVLine(lines[i].trim());
+        const guest = parseImportedGuestFromCSVRow(parts, colMap);
+        if (guest) importedGuests.push(guest);
+    }
+
+    if (importedGuests.length === 0) {
+        return {
+            error: '❌ 未能讀取任何賓客資料，請確認 CSV 格式是否正確。\n\n預期表頭包含：桌號、座位、姓名（或舊版：姓名、分配桌次）'
+        };
+    }
+
+    return { importedGuests };
+}
+
+function buildCSVImportSuccessMessage(plan) {
+    const { stats, mode } = plan;
+    const modeLabel = mode === 'merge' ? '合併匯入' : '完全取代';
+    let message = `✅ 已${modeLabel}並同步 ${stats.resultTotal} 位賓客至 Firebase！\n\n`;
+    message += `• CSV 讀取：${stats.csvTotal} 位\n`;
+    message += `• 新增：${stats.added} 位\n`;
+    message += `• 更新：${stats.updated} 位\n`;
+    message += `• 不變：${stats.unchanged} 位\n`;
+    if (mode === 'merge') {
+        message += `• 保留（CSV 冇寫到）：${stats.kept} 位\n`;
+    } else {
+        message += `• 刪除（CSV 冇寫到）：${stats.removed} 位\n`;
+    }
+    message += `• 已分配枱位：${stats.assigned} 位\n`;
+    message += `• 未分配：${stats.unassigned} 位\n\n畫布排位頁面亦會更新。`;
+    return message;
+}
+
+function applyConfirmedCSVImport(plan) {
+    csvImportInProgress = true;
+    localGuestsList = plan.resultGuests;
+    renderThead();
+    renderDOMRows();
+    refreshRowSequenceNumbersOnly();
+
+    const assignedTables = plan.resultGuests.map((g) => g.table).filter((t) => t !== '' && t != null);
+    const focusTable = assignedTables.length ? assignedTables[assignedTables.length - 1] : null;
+
+    return saveAllToFirebase({
+        successMessage: buildCSVImportSuccessMessage(plan),
+        reloadAfterSave: true
+    }).then(() => {
+        if (focusTable) scrollToTableInList(focusTable);
+    }).finally(() => {
+        csvImportInProgress = false;
+        pendingCSVImportData = null;
+    });
 }
 
 function importCSVAction() {
@@ -294,70 +508,29 @@ function importCSVAction() {
 
     const reader = new FileReader();
     reader.onload = function (e) {
-        const lines = e.target.result.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
-        if (lines.length === 0) {
-            alert('❌ CSV 檔案是空的。');
-            return;
-        }
-
-        const headerParts = parseCSVLine(lines[0].trim());
-        let colMap = buildCSVColumnMap(headerParts);
-
-        // 無表頭或表頭無法辨識時，假設為匯出格式：順序,桌號,座位,姓名,來源,標籤
-        const firstDataParts = lines.length > 1 ? parseCSVLine(lines[1].trim()) : [];
-        if (colMap.name == null) {
-            const looksLikeNewExport = firstDataParts.length >= 4
-                && !isNaN(parseInt(firstDataParts[0], 10))
-                && !isNaN(parseInt(firstDataParts[1], 10));
-            if (looksLikeNewExport) {
-                colMap = { seq: 0, table: 1, seat: 2, name: 3, side: 4, tags: 5 };
-            } else {
-                // 舊格式：姓名,來源,群組,分配桌次
-                colMap = { name: 0, side: 1, tags: 2, table: 3 };
-            }
-        }
-
-        const dataStartIndex = colMap.name != null && buildCSVColumnMap(headerParts).name != null ? 1 : 0;
-        let importedGuests = [];
-        let assignedCount = 0;
-
-        for (let i = dataStartIndex; i < lines.length; i++) {
-            const parts = parseCSVLine(lines[i].trim());
-            const guest = parseImportedGuestFromCSVRow(parts, colMap);
-            if (!guest) continue;
-            if (guest.table !== '' && guest.table != null) assignedCount += 1;
-            importedGuests.push(guest);
-        }
-
+        const parsed = parseCSVFileContent(e.target.result);
         fileInput.value = '';
 
-        if (importedGuests.length === 0) {
-            alert('❌ 未能讀取任何賓客資料，請確認 CSV 格式是否正確。\n\n預期表頭包含：桌號、座位、姓名（或舊版：姓名、分配桌次）');
+        if (parsed.error) {
+            alert(parsed.error);
             return;
         }
 
-        csvImportInProgress = true;
-        localGuestsList = sortGuestsListByTableAndSeat(importedGuests);
-        renderThead();
-        renderDOMRows();
-        refreshRowSequenceNumbersOnly();
+        const existingGuests = typeof collectGuestsFromDOM === 'function'
+            ? collectGuestsFromDOM()
+            : localGuestsList;
 
-        const assignedTables = importedGuests.map(g => g.table).filter(t => t !== '' && t != null);
-        const focusTable = assignedTables.length ? assignedTables[assignedTables.length - 1] : null;
-        const unassignedCount = importedGuests.length - assignedCount;
+        pendingCSVImportData = {
+            fileName: file.name,
+            importedGuests: parsed.importedGuests,
+            existingGuests
+        };
 
-        saveAllToFirebase({
-            successMessage: `✅ 已匯入並同步 ${importedGuests.length} 位賓客至 Firebase！\n\n• 已分配枱位：${assignedCount} 位\n• 未分配：${unassignedCount} 位\n\n畫布排位頁面亦會更新。`,
-            reloadAfterSave: true
-        }).then(() => {
-            if (focusTable) scrollToTableInList(focusTable);
-        }).finally(() => {
-            csvImportInProgress = false;
-        });
+        openCSVImportPreviewDialog();
     };
     reader.onerror = function () {
         fileInput.value = '';
-        csvImportInProgress = false;
+        pendingCSVImportData = null;
         alert('❌ 讀取 CSV 檔案失敗，請重試。');
     };
     reader.readAsText(file, 'UTF-8');
@@ -369,7 +542,7 @@ function shouldAutoReloadAdminRows() {
     if (!active) return true;
     const tag = active.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return false;
-    return !active.closest('#custom-dialog-overlay, #delete-tag-dialog-overlay, #leave-page-dialog-overlay');
+    return !active.closest('#custom-dialog-overlay, #delete-tag-dialog-overlay, #leave-page-dialog-overlay, #csv-import-dialog-overlay');
 }
 
 function startAdminRealtimeSync() {

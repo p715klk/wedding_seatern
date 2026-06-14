@@ -302,6 +302,11 @@ function collectGuestFromRow(row) {
         })(),
         group: readTagsFromRow(row, PRIMARY_TAG_KEY)
     };
+    if (row.dataset.guestCanceled === '1') {
+        guest.isCanceled = true;
+        const preserved = parseInt(row.dataset.preservedSort, 10);
+        if (!isNaN(preserved) && preserved >= 1) guest.preservedSort = preserved;
+    }
     return guest.name ? guest : null;
 }
 
@@ -693,6 +698,210 @@ function confirmLeaveAdminPage(action) {
             })
             .catch(() => {});
     }
+}
+
+// ==========================================
+// 📌 CSV 匯入預覽對話框
+// ==========================================
+const CSV_IMPORT_PREVIEW_LIMIT = 12;
+
+function escapeHtml(text) {
+    return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function getSelectedCSVImportMode() {
+    const checked = document.querySelector('input[name="csv-import-mode"]:checked');
+    return checked?.value === 'replace' ? 'replace' : 'merge';
+}
+
+function renderCSVImportPreviewSummary(plan) {
+    const summaryEl = document.getElementById('csv-import-preview-summary');
+    if (!summaryEl) return;
+
+    const cards = [
+        { label: 'CSV 讀取', value: plan.stats.csvTotal, tone: 'bg-gray-50 text-gray-700 border-gray-200' },
+        { label: '新增', value: plan.stats.added, tone: 'bg-green-50 text-green-700 border-green-200' },
+        { label: '更新', value: plan.stats.updated, tone: 'bg-blue-50 text-blue-700 border-blue-200' },
+        { label: '不變', value: plan.stats.unchanged, tone: 'bg-slate-50 text-slate-700 border-slate-200' }
+    ];
+
+    if (plan.mode === 'merge') {
+        cards.push({ label: '保留', value: plan.stats.kept, tone: 'bg-indigo-50 text-indigo-700 border-indigo-200' });
+    } else {
+        cards.push({ label: '將刪除', value: plan.stats.removed, tone: 'bg-red-50 text-red-700 border-red-200' });
+    }
+
+    cards.push({
+        label: '匯入後總數',
+        value: plan.stats.resultTotal,
+        tone: 'bg-amber-50 text-amber-800 border-amber-200'
+    });
+
+    summaryEl.innerHTML = cards.map((card) => `
+        <div class="rounded-lg border px-2 py-2 ${card.tone}">
+            <div class="text-[10px] font-bold uppercase tracking-wide opacity-80">${card.label}</div>
+            <div class="text-lg font-black leading-tight">${card.value}</div>
+        </div>
+    `).join('');
+}
+
+function renderCSVImportPreviewGuestLine(guest, extra = '') {
+    const tags = formatGuestTagsLabel(guest.group);
+    const placement = formatGuestPlacementLabel(guest);
+    return `<li class="leading-relaxed">
+        <span class="font-bold text-gray-900">${escapeHtml(guest.name)}</span>
+        <span class="text-gray-500"> · ${escapeHtml(guest.side)} · ${escapeHtml(tags)} · ${escapeHtml(placement)}</span>
+        ${extra}
+    </li>`;
+}
+
+function renderCSVImportPreviewSection(title, toneClass, items, renderItem) {
+    if (!items.length) return '';
+    const visible = items.slice(0, CSV_IMPORT_PREVIEW_LIMIT);
+    const hiddenCount = items.length - visible.length;
+    return `
+        <section class="rounded-lg border p-3 ${toneClass}">
+            <h4 class="font-bold mb-2">${title}（${items.length}）</h4>
+            <ul class="space-y-1 list-disc pl-4 text-gray-700">
+                ${visible.map(renderItem).join('')}
+            </ul>
+            ${hiddenCount > 0 ? `<p class="mt-2 text-gray-500">…另有 ${hiddenCount} 位未顯示</p>` : ''}
+        </section>
+    `;
+}
+
+function renderCSVImportPreviewDetails(plan) {
+    const detailsEl = document.getElementById('csv-import-preview-details');
+    if (!detailsEl) return;
+
+    const sections = [
+        renderCSVImportPreviewSection(
+            '新增',
+            'border-green-200 bg-green-50/40',
+            plan.preview.added,
+            (guest) => renderCSVImportPreviewGuestLine(guest)
+        ),
+        renderCSVImportPreviewSection(
+            '更新',
+            'border-blue-200 bg-blue-50/40',
+            plan.preview.updated,
+            (item) => renderCSVImportPreviewGuestLine(
+                item.after,
+                `<span class="block text-blue-700 font-bold mt-0.5">${escapeHtml(item.changes.join('；'))}</span>`
+            )
+        ),
+        renderCSVImportPreviewSection(
+            '不變',
+            'border-slate-200 bg-slate-50/60',
+            plan.preview.unchanged,
+            (guest) => renderCSVImportPreviewGuestLine(guest)
+        )
+    ];
+
+    if (plan.mode === 'merge') {
+        sections.push(renderCSVImportPreviewSection(
+            '保留（CSV 冇寫到）',
+            'border-indigo-200 bg-indigo-50/40',
+            plan.preview.kept,
+            (guest) => renderCSVImportPreviewGuestLine(guest)
+        ));
+    } else {
+        sections.push(renderCSVImportPreviewSection(
+            '將刪除（CSV 冇寫到）',
+            'border-red-200 bg-red-50/50',
+            plan.preview.removed,
+            (guest) => renderCSVImportPreviewGuestLine(guest)
+        ));
+    }
+
+    const html = sections.filter(Boolean).join('');
+    detailsEl.innerHTML = html || '<p class="text-gray-500">沒有可顯示的變更。</p>';
+}
+
+function renderCSVImportPreviewWarnings(plan) {
+    const warningsEl = document.getElementById('csv-import-preview-warnings');
+    if (!warningsEl) return;
+
+    const warnings = [];
+    if (plan.duplicates.length) {
+        const sample = plan.duplicates.slice(0, 5).map((dup) =>
+            `第 ${dup.row} 行：${dup.name}（${dup.side} · ${dup.tags}）`
+        ).join('；');
+        const more = plan.duplicates.length > 5 ? `…等 ${plan.duplicates.length} 筆` : '';
+        warnings.push(`CSV 內有重複配對（姓名+來源+標籤相同），以最後一行為準：${sample}${more}`);
+    }
+    if (plan.mode === 'replace' && plan.stats.removed > 0) {
+        warnings.push(`完全取代模式會刪除 ${plan.stats.removed} 位 CSV 冇寫到嘅賓客。`);
+    }
+
+    if (!warnings.length) {
+        warningsEl.classList.add('hidden');
+        warningsEl.innerHTML = '';
+        return;
+    }
+
+    warningsEl.classList.remove('hidden');
+    warningsEl.innerHTML = warnings.map((text) => `<p class="leading-relaxed">⚠️ ${escapeHtml(text)}</p>`).join('');
+}
+
+function refreshCSVImportPreview() {
+    if (!pendingCSVImportData) return;
+
+    const mode = getSelectedCSVImportMode();
+    const plan = buildCSVImportPlan(
+        pendingCSVImportData.importedGuests,
+        pendingCSVImportData.existingGuests,
+        mode
+    );
+    pendingCSVImportData.plan = plan;
+
+    renderCSVImportPreviewSummary(plan);
+    renderCSVImportPreviewWarnings(plan);
+    renderCSVImportPreviewDetails(plan);
+
+    const confirmBtn = document.getElementById('btn-confirm-csv-import');
+    if (confirmBtn) {
+        confirmBtn.textContent = mode === 'replace' ? '確認完全取代' : '確認合併匯入';
+    }
+}
+
+function openCSVImportPreviewDialog() {
+    if (!pendingCSVImportData) return;
+
+    const fileNameEl = document.getElementById('csv-import-file-name');
+    if (fileNameEl) {
+        fileNameEl.textContent = `檔案：${pendingCSVImportData.fileName}`;
+    }
+
+    const mergeRadio = document.querySelector('input[name="csv-import-mode"][value="merge"]');
+    if (mergeRadio) mergeRadio.checked = true;
+
+    refreshCSVImportPreview();
+    document.getElementById('csv-import-dialog-overlay').classList.remove('hidden');
+}
+
+function closeCSVImportDialog(isConfirm) {
+    document.getElementById('csv-import-dialog-overlay').classList.add('hidden');
+
+    if (!isConfirm || !pendingCSVImportData?.plan) {
+        pendingCSVImportData = null;
+        return;
+    }
+
+    const plan = pendingCSVImportData.plan;
+    if (plan.mode === 'replace' && plan.stats.removed > 0) {
+        const ok = confirm(`確定要完全取代名單嗎？\n\n將刪除 ${plan.stats.removed} 位 CSV 冇寫到嘅賓客，此操作會即時寫入 Firebase。`);
+        if (!ok) {
+            pendingCSVImportData = null;
+            return;
+        }
+    }
+
+    applyConfirmedCSVImport(plan).catch(() => {});
 }
 
 function setupAdminLeaveGuard() {

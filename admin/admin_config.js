@@ -98,6 +98,48 @@ function mergeGuestLabelsToTags(guest, keys) {
     return [...tags];
 }
 
+/** 匯入合併用：姓名 + 來源 + 標籤（標籤排序後以 ; 連接） */
+function guestIdentityKey(guest) {
+    const name = String(guest?.name || '').trim();
+    const side = guest?.side === '女方' ? '女方' : '男方';
+    const tags = normalizeTags(guest?.group ?? guest?.[PRIMARY_TAG_KEY]).slice().sort().join(';');
+    return `${name}\x1f${side}\x1f${tags}`;
+}
+
+function normalizeGuestForList(guest) {
+    const tableRaw = guest?.table;
+    const tableNum = parseInt(tableRaw, 10);
+    const hasTable = tableRaw !== '' && tableRaw != null && !isNaN(tableNum) && tableNum >= 1;
+    const sortNum = parseInt(guest?.sort, 10);
+    return {
+        name: String(guest?.name || '').trim(),
+        side: guest?.side === '女方' ? '女方' : '男方',
+        table: hasTable ? tableNum : '',
+        sort: hasTable ? ((!isNaN(sortNum) && sortNum >= 1) ? sortNum : 1) : 99,
+        group: normalizeTags(guest?.group ?? guest?.[PRIMARY_TAG_KEY]),
+        isCanceled: !!guest?.isCanceled,
+        preservedSort: guest?.preservedSort ?? null,
+        seatReleased: !!guest?.seatReleased
+    };
+}
+
+function formatGuestTagsLabel(tags) {
+    const list = normalizeTags(tags);
+    return list.length ? list.join('、') : '（無標籤）';
+}
+
+function formatGuestPlacementLabel(guest) {
+    if (guest.table === '' || guest.table == null) return '未分配';
+    const seat = guest.isCanceled ? '已釋放' : (guest.sort || 1);
+    return `第 ${guest.table} 桌 · 座位 ${seat}`;
+}
+
+function dedupeImportedGuestsLastWins(importedGuests) {
+    const map = new Map();
+    importedGuests.forEach((guest) => map.set(guestIdentityKey(guest), guest));
+    return [...map.values()];
+}
+
 // UI 元素與實例快取
 let tbody = null;
 let scrollContainer = null;
@@ -105,6 +147,7 @@ let activeSelectElement = null;
 let activeColumnKey = null; 
 let sortableInstance = null;
 let csvImportInProgress = false;
+let pendingCSVImportData = null;
 let adminHasUnsavedChanges = false;
 let pendingLeaveHref = null;
 
