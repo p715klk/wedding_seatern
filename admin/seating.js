@@ -1998,6 +1998,9 @@ function finishGuestTouchDrag(dragging, dragData, ghost, clientX, clientY) {
     if (ghost) ghost.remove();
     isGuestDragging = false;
     cancelTableDrag();
+    if (dragData?.fromTable === 'POOL' && !isMobileViewport()) {
+        openSidebar();
+    }
 }
 
 function handleGuestTouchMove(t, startX, startY, state, opts, sidebarRight, ev) {
@@ -2104,6 +2107,9 @@ function setupDesktopGuestDrag(el, getDragData, options = {}) {
     el.addEventListener('dragend', () => {
         isGuestDragging = false;
         cancelTableDrag();
+        if (options.trackSidebarLeave && !isMobileViewport()) {
+            openSidebar();
+        }
     });
 }
 
