@@ -105,6 +105,21 @@ function buildSeatCellContent(tableNum, seatValue = '') {
     return `<span class="row-seat-label inline-flex items-center gap-0.5 font-mono font-bold text-gray-600 flex-wrap justify-center">第 <span class="row-table-display-num">${tableNum}</span> 桌 - 第 ${seatInputHTML} 位</span>`;
 }
 
+function buildCanceledSeatCellContent(tableNum) {
+    return `<span class="row-seat-released inline-flex items-center gap-0.5 font-mono font-bold text-red-500 flex-wrap justify-center">第 <span class="row-table-display-num">${tableNum}</span> 桌 - <span title="簽到頁已取消，座位已釋放；原座位資料仍保留於 Firebase">已釋放</span></span>`;
+}
+
+function isCanceledAdminRow(row) {
+    return !!(row && row.dataset.guestCanceled === '1');
+}
+
+function applyCanceledRowDataset(row, preservedSort) {
+    row.dataset.guestCanceled = '1';
+    if (preservedSort != null && preservedSort >= 1) {
+        row.dataset.preservedSort = String(preservedSort);
+    }
+}
+
 function stepNumberSpinInput(btn, delta) {
     const wrap = btn.closest('.row-table-wrap, .row-seat-wrap');
     const input = wrap?.querySelector('.row-table-input, .row-seat-input');
@@ -277,6 +292,10 @@ function collectGuestFromRow(row) {
         side: row.querySelector('.row-side-select').value,
         table: row.querySelector('.row-table-input').value.trim(),
         sort: (() => {
+            if (row.dataset.guestCanceled === '1') {
+                const preserved = parseInt(row.dataset.preservedSort, 10);
+                if (!isNaN(preserved) && preserved >= 1) return String(preserved);
+            }
             const seatInput = row.querySelector('.row-seat-input');
             if (seatInput && seatInput.value.trim() !== '') return seatInput.value.trim();
             return '99';
@@ -368,7 +387,14 @@ function renderDOMRows() {
 
     localGuestsList.forEach((guest, index) => {
         const tr = document.createElement('tr');
-        tr.className = "hover:bg-gray-50 transition bg-white";
+        const isCanceled = !!guest.isCanceled;
+
+        if (isCanceled) {
+            tr.className = "row-guest-canceled hover:bg-red-50/60 transition bg-red-50/40";
+            applyCanceledRowDataset(tr, guest.preservedSort ?? guest.sort);
+        } else {
+            tr.className = "hover:bg-gray-50 transition bg-white";
+        }
         
         const sideSelectHTML = `
             <select onchange="refreshRowTagColors(this.closest('tr'))" class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-side-select">
@@ -386,18 +412,29 @@ function renderDOMRows() {
         });
         const guestSide = guest.side === '女方' ? '女方' : '男方';
         const labelsTdHTML = buildMultiTagCellHTML(PRIMARY_TAG_KEY, tags, guestSide);
-        const seatCellHTML = guest.table
-            ? buildSeatCellContent(guest.table, guest.sort || 1)
-            : '<span class="text-gray-400">未安排</span>';
+        const seatCellHTML = !guest.table
+            ? '<span class="text-gray-400">未安排</span>'
+            : isCanceled
+                ? buildCanceledSeatCellContent(guest.table)
+                : buildSeatCellContent(guest.table, guest.sort || 1);
+
+        const nameCellHTML = isCanceled
+            ? `<div class="flex flex-col gap-0.5">
+                <input type="text" value="${guest.name}" class="w-full border border-red-200 rounded p-1 font-bold bg-transparent focus:bg-white row-name-input text-gray-500">
+                <span class="row-cancel-badge text-[10px] font-bold text-red-600 leading-tight">❌ 已取消（簽到頁）</span>
+               </div>`
+            : `<input type="text" value="${guest.name}" class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-name-input">`;
+
+        const dragCellHTML = isCanceled
+            ? '<span class="text-gray-300 text-sm" title="已取消賓客不可拖動排序">🔒</span>'
+            : '☰';
 
         tr.innerHTML = `
             <td class="py-2 px-1 text-center font-mono text-gray-400 font-bold row-sort-num row-sort-cell">${index + 1}</td>
-            <td class="py-2 px-1 text-center drag-handle text-gray-400 text-base select-none cursor-row-resize row-drag-cell">☰</td>
+            <td class="py-2 px-1 text-center drag-handle text-gray-400 text-base select-none ${isCanceled ? 'cursor-not-allowed' : 'cursor-row-resize'} row-drag-cell">${dragCellHTML}</td>
             <td class="py-2 px-1 row-table-cell">${tableInputHTML}</td>
             <td class="py-2 px-2 text-center row-seat-txt-cell">${seatCellHTML}</td>
-            <td class="py-2 px-2">
-                <input type="text" value="${guest.name}" class="w-full border border-gray-200 rounded p-1 font-bold bg-transparent focus:bg-white row-name-input">
-            </td>
+            <td class="py-2 px-2">${nameCellHTML}</td>
             <td class="py-2 px-1 row-side-cell">${sideSelectHTML}</td>
             ${labelsTdHTML}
             <td class="py-2 px-2 text-center">
@@ -432,6 +469,8 @@ function reinitTableSortable() {
     if (typeof Sortable !== 'undefined' && tbody) {
         sortableInstance = Sortable.create(tbody, {
             handle: '.drag-handle',
+            filter: '.row-guest-canceled',
+            preventOnFilter: true,
             animation: 150,
             ghostClass: 'sortable-ghost',
             onEnd: function () {
@@ -510,7 +549,7 @@ function deleteRowAction(btn) {
 function getOccupiedSeatsOnTable(tableNum, excludeRow = null) {
     const occupied = new Set();
     tbody.querySelectorAll('tr').forEach(r => {
-        if (r === excludeRow) return;
+        if (r === excludeRow || isCanceledAdminRow(r)) return;
         const tableInput = r.querySelector('.row-table-input');
         const seatInput = r.querySelector('.row-seat-input');
         if (!tableInput || !seatInput) return;
@@ -546,6 +585,12 @@ function syncSeatCellForRow(row) {
     }
 
     const tableNum = parseInt(tVal, 10);
+
+    if (isCanceledAdminRow(row)) {
+        txtCell.innerHTML = buildCanceledSeatCellContent(tableNum);
+        return;
+    }
+
     const existingSeat = row.querySelector('.row-seat-input');
     const displayNum = txtCell.querySelector('.row-table-display-num');
     const prevTable = displayNum ? parseInt(displayNum.textContent, 10) : NaN;
@@ -561,6 +606,8 @@ function syncSeatCellForRow(row) {
 }
 
 function setSeatValueForRow(row, tableNum, seatNum) {
+    if (isCanceledAdminRow(row)) return;
+
     const txtCell = row.querySelector('.row-seat-txt-cell');
     if (!txtCell) return;
 
@@ -585,6 +632,7 @@ function reassignSeatsByDomOrderPerTable() {
 
     tbody.querySelectorAll('tr').forEach(row => {
         if (!row.querySelector('.row-name-input')) return;
+        if (isCanceledAdminRow(row)) return;
 
         const tableInput = row.querySelector('.row-table-input');
         const txtCell = row.querySelector('.row-seat-txt-cell');

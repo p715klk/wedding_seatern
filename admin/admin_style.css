@@ -241,6 +241,23 @@
     }
 }
 
+/* 簽到頁已取消賓客 — 後台唯讀標示（座位顯示已釋放，Firebase sort 保留） */
+tr.row-guest-canceled .row-name-input {
+    text-decoration: line-through;
+}
+
+tr.row-guest-canceled .row-cancel-badge {
+    user-select: none;
+}
+
+tr.row-guest-canceled .row-seat-released {
+    user-select: none;
+}
+
+tr.row-guest-canceled .drag-handle {
+    cursor: not-allowed !important;
+}
+
 /* 1366×768 等矮螢幕：壓緊頁面留白 + 略增行高，確保 8–10 行 */
 @media screen and (min-width: 769px) and (max-height: 820px) {
     body.admin-page {

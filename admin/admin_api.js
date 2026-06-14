@@ -3,6 +3,19 @@
 // ==========================================
 let guestStatusCache = {};
 
+function getGuestArrivalStatus(tableNum, guestName) {
+    if (tableNum == null || tableNum === '' || !guestName) return '未到';
+    const key = `${tableNum}_${guestName}`;
+    const raw = guestStatusCache[key]?.arrived;
+    if (raw === '取消') return '取消';
+    if (raw === true || raw === '已到') return '已到';
+    return '未到';
+}
+
+function isGuestCanceled(tableNum, guestName) {
+    return getGuestArrivalStatus(tableNum, guestName) === '取消';
+}
+
 function resolveGuestSeatNumber(tableNum, guest, tableGuests, guestStatus) {
     const existingSort = parseInt(guest.sort, 10);
     if (!isNaN(existingSort) && existingSort >= 1) return existingSort;
@@ -91,11 +104,16 @@ function processFirebaseData(weddingGuests, unassignedGuests) {
 
         tableGuests.forEach(guest => {
             const mergeKeys = window._legacyLabelKeys || labelColumnsKeys;
+            const rawSort = parseInt(guest.sort, 10);
+            const isCanceled = isGuestCanceled(tableNumInt, guest.name);
+            const preservedSort = !isNaN(rawSort) && rawSort >= 1 ? rawSort : null;
             localGuestsList.push({
                 name: guest.name,
                 side: guest.side || '男方',
                 table: tableNumInt,
-                sort: resolveGuestSeatNumber(tableNumInt, guest, tableGuests, guestStatusCache),
+                sort: preservedSort ?? resolveGuestSeatNumber(tableNumInt, guest, tableGuests, guestStatusCache),
+                isCanceled,
+                preservedSort,
                 group: mergeGuestLabelsToTags(guest, mergeKeys)
             });
         });
@@ -148,6 +166,7 @@ function saveAllToFirebase(options = {}) {
         const gTableRaw = row.querySelector('.row-table-input').value.trim();
         const seatInput = row.querySelector('.row-seat-input');
         const gSeatRaw = seatInput ? seatInput.value.trim() : '';
+        const isCanceledRow = row.dataset.guestCanceled === '1';
 
         if (!gName) return;
 
@@ -161,7 +180,15 @@ function saveAllToFirebase(options = {}) {
         } else {
             const targetTable = parseInt(gTableRaw);
             if (!newWeddingGuests[targetTable]) newWeddingGuests[targetTable] = [];
-            let seatNum = parseInt(gSeatRaw, 10);
+            let seatNum;
+            if (isCanceledRow) {
+                const preserved = parseInt(row.dataset.preservedSort, 10);
+                seatNum = !isNaN(preserved) && preserved >= 1
+                    ? preserved
+                    : parseInt(gSeatRaw, 10);
+            } else {
+                seatNum = parseInt(gSeatRaw, 10);
+            }
             if (isNaN(seatNum) || seatNum < 1) seatNum = 1;
             guestData.sort = Math.min(ABSOLUTE_MAX_SEATS_PER_TABLE, seatNum);
             newWeddingGuests[targetTable].push(guestData);
@@ -198,7 +225,9 @@ function exportToCSV() {
         const table = row.querySelector('.row-table-input').value.trim();
         const side = row.querySelector('.row-side-select').value;
         const seatInput = row.querySelector('.row-seat-input');
-        const seat = seatInput ? seatInput.value.trim() : '';
+        const seat = row.dataset.guestCanceled === '1'
+            ? '已釋放'
+            : (seatInput ? seatInput.value.trim() : '');
 
         if (name) {
             seq += 1;
