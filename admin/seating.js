@@ -236,9 +236,7 @@ function forEachAssignedGuest(callback) {
 function collectAllGuestsInSeating() {
     const guests = [];
     forEachAssignedGuest(g => { if (g && g.name) guests.push(g); });
-    if (Array.isArray(unassignedPool)) {
-        unassignedPool.forEach(g => { if (g && g.name) guests.push(g); });
-    }
+    normalizeUnassignedPool(unassignedPool).forEach(g => { if (g && g.name) guests.push(g); });
     return guests;
 }
 
@@ -1647,11 +1645,64 @@ function sortGuestArraysBySeat() {
 let suppressGuestRemoteRenderCount = 0;
 const guestPersistPendingTables = new Set();
 let guestPersistPoolDirty = false;
+let localGuestRevision = 0;
+let lastPersistedGuestRevision = 0;
 
-function persistGuestState(affectedTableNums) {
+function shouldApplyRemoteGuestState() {
+    return localGuestRevision <= lastPersistedGuestRevision;
+}
+
+function normalizeUnassignedPool(raw) {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.filter(g => g != null);
+    if (typeof raw === 'object') {
+        return Object.keys(raw)
+            .sort((a, b) => Number(a) - Number(b))
+            .map(k => raw[k])
+            .filter(g => g != null);
+    }
+    return [];
+}
+
+function sanitizeGuestStateBeforePersist() {
+    unassignedPool = normalizeUnassignedPool(unassignedPool);
+
+    const poolNames = new Set();
+    const dedupedPool = [];
+    unassignedPool.forEach(g => {
+        if (!g?.name || poolNames.has(g.name)) return;
+        poolNames.add(g.name);
+        g.sort = 99;
+        dedupedPool.push(g);
+    });
+    unassignedPool = dedupedPool;
+
+    const stripTableList = (list) => {
+        if (!Array.isArray(list)) return [];
+        const seen = new Set();
+        return list.filter(g => {
+            if (!g?.name) return false;
+            if (poolNames.has(g.name)) return false;
+            if (seen.has(g.name)) return false;
+            seen.add(g.name);
+            return true;
+        });
+    };
+
+    if (Array.isArray(allGuests)) {
+        allGuests = allGuests.map(stripTableList);
+    } else if (allGuests && typeof allGuests === 'object') {
+        Object.keys(allGuests).forEach(key => {
+            allGuests[key] = stripTableList(allGuests[key]);
+        });
+    }
+}
+
+function persistGuestState(affectedTableNums, poolDirty = false) {
+    sanitizeGuestStateBeforePersist();
     sortGuestArraysBySeat();
     const updates = {};
-    if (guestPersistPoolDirty) {
+    if (poolDirty) {
         updates.unassigned_guests = unassignedPool;
     }
     const nums = affectedTableNums?.length
@@ -1664,9 +1715,12 @@ function persistGuestState(affectedTableNums) {
         updates[`wedding_guests/${idx}`] = list && list.length ? list : null;
     });
 
-    suppressGuestRemoteRenderCount = guestPersistPoolDirty ? 2 : 1;
-    return database.ref().update(updates).catch(err => {
+    suppressGuestRemoteRenderCount = poolDirty ? 2 : 1;
+    return database.ref().update(updates).then(() => {
+        lastPersistedGuestRevision = localGuestRevision;
+    }).catch(err => {
         suppressGuestRemoteRenderCount = 0;
+        lastPersistedGuestRevision = localGuestRevision;
         console.warn('賓客狀態同步失敗:', err);
         throw err;
     });
@@ -1683,7 +1737,7 @@ function schedulePersistGuestState(affectedTableNums, poolDirty) {
         guestPersistPendingTables.clear();
         guestPersistPoolDirty = false;
         if (!tables.length && !poolDirtyNow) return;
-        return persistGuestState(tables.length ? tables : getTableSettingKeys());
+        return persistGuestState(tables.length ? tables : getTableSettingKeys(), poolDirtyNow);
     });
     return guestPersistQueue;
 }
@@ -1819,6 +1873,7 @@ function applyGuestMoveUI(tableNums, { poolChanged = false, poolSides = null } =
 }
 
 function commitGuestStateChange(affectedTableNums, { poolChanged = false, poolSides = null } = {}) {
+    localGuestRevision++;
     applyGuestMoveUI(affectedTableNums, { poolChanged, poolSides });
     return schedulePersistGuestState(affectedTableNums, poolChanged);
 }
@@ -1832,8 +1887,9 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
     let movingGuestObj = null;
 
     if (fromTable === 'POOL') {
+        unassignedPool = normalizeUnassignedPool(unassignedPool);
         movingGuestObj = unassignedPool[index];
-        unassignedPool.splice(index, 1);
+        if (movingGuestObj) unassignedPool.splice(index, 1);
     } else {
         const fromTableIdx = parseInt(fromTable, 10);
         const foundIdx = findGuestBySeat(fromTableIdx, seatIndex);
@@ -1851,7 +1907,10 @@ function moveGuestToSeat(data, toTableNum, targetSeatIdx) {
         const bumpedGuest = allGuests[toTableIdx][occupiedIdx];
         if (fromTable === 'POOL') {
             bumpedGuest.sort = 99;
-            unassignedPool.push(bumpedGuest);
+            unassignedPool = normalizeUnassignedPool(unassignedPool);
+            if (!unassignedPool.some(g => g?.name === bumpedGuest.name)) {
+                unassignedPool.push(bumpedGuest);
+            }
             bumpedToPool = bumpedGuest;
         } else {
             const fromTableIdx = parseInt(fromTable, 10);
@@ -1889,8 +1948,10 @@ function moveGuestToPool(data) {
     const movingGuestObj = allGuests[fromTableIdx][foundIdx];
     allGuests[fromTableIdx].splice(foundIdx, 1);
     movingGuestObj.sort = 99;
-    if (!unassignedPool) unassignedPool = [];
-    unassignedPool.push(movingGuestObj);
+    unassignedPool = normalizeUnassignedPool(unassignedPool);
+    if (!unassignedPool.some(g => g?.name === movingGuestObj.name)) {
+        unassignedPool.push(movingGuestObj);
+    }
 
     commitGuestStateChange([String(fromTable)], {
         poolChanged: true,
@@ -2081,7 +2142,7 @@ function setGlobalStatsMessage(message) {
 function handleSeatingDataRoot(root) {
     root = root || {};
     allGuests = root.wedding_guests || [];
-    unassignedPool = root.unassigned_guests || [];
+    unassignedPool = normalizeUnassignedPool(root.unassigned_guests);
     tableSettings = loadTableSettings(root.table_settings);
     applyMetaLabelColumns(root.meta_label_columns);
 
@@ -2125,12 +2186,15 @@ function markSeatingPartialReady(key) {
 setGlobalStatsMessage('連線中...');
 
 database.ref('wedding_guests').on('value', (snapshot) => {
-    allGuests = snapshot.val() || [];
+    if (shouldApplyRemoteGuestState()) {
+        allGuests = snapshot.val() || [];
+    }
     markSeatingPartialReady('guests');
     if (suppressGuestRemoteRenderCount > 0) {
         suppressGuestRemoteRenderCount--;
         return;
     }
+    if (!shouldApplyRemoteGuestState()) return;
     runRender();
 }, err => {
     console.error('wedding_guests 讀取失敗:', err);
@@ -2138,12 +2202,15 @@ database.ref('wedding_guests').on('value', (snapshot) => {
 });
 
 database.ref('unassigned_guests').on('value', (snapshot) => {
-    unassignedPool = snapshot.val() || [];
+    if (shouldApplyRemoteGuestState()) {
+        unassignedPool = normalizeUnassignedPool(snapshot.val());
+    }
     markSeatingPartialReady('pool');
     if (suppressGuestRemoteRenderCount > 0) {
         suppressGuestRemoteRenderCount--;
         return;
     }
+    if (!shouldApplyRemoteGuestState()) return;
     runRender();
 }, err => console.error('unassigned_guests 讀取失敗:', err));
 
@@ -2190,16 +2257,14 @@ function updateGlobalStats() {
             table.forEach(g => { if (g && g.name) { total++; assigned++; } });
         }
     });
-    if (Array.isArray(unassignedPool)) {
-        unassignedPool.forEach(g => { if (g && g.name) { total++; } });
-    }
+    normalizeUnassignedPool(unassignedPool).forEach(g => { if (g && g.name) { total++; } });
     document.getElementById('global-stats').innerText = `已排位: ${assigned} / 總人數: ${total}`;
 }
 
 function collectPoolBySide(side) {
     const groups = {};
     let count = 0;
-    const pool = Array.isArray(unassignedPool) ? unassignedPool : [];
+    const pool = normalizeUnassignedPool(unassignedPool);
     pool.forEach((guest, index) => {
         if (!guest || !guest.name) return;
         const isMatch = side === '男方' ? guest.side === '男方' : guest.side !== '男方';
@@ -2442,9 +2507,10 @@ function removeGuestFromSeatAction() {
         let guestObj = allGuests[tableIdx][foundIdx];
         allGuests[tableIdx].splice(foundIdx, 1);
         guestObj.sort = 99;
-
-        if (!unassignedPool) unassignedPool = [];
-        unassignedPool.push(guestObj);
+        unassignedPool = normalizeUnassignedPool(unassignedPool);
+        if (!unassignedPool.some(g => g?.name === guestObj.name)) {
+            unassignedPool.push(guestObj);
+        }
 
         commitGuestStateChange([String(tableNum)], {
             poolChanged: true,
@@ -2610,7 +2676,7 @@ function deleteTableAction() {
 
     const idx = parseInt(tableNum, 10);
     const guestsInTable = Array.isArray(allGuests[idx]) ? allGuests[idx] : [];
-    if (!Array.isArray(unassignedPool)) unassignedPool = [];
+    if (!Array.isArray(unassignedPool)) unassignedPool = normalizeUnassignedPool(unassignedPool);
 
     guestsInTable.forEach(g => {
         if (g && g.name) {
