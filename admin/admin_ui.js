@@ -613,4 +613,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
     reinitTableSortable();
     loadFirebaseData();
+    startAdminRealtimeSync();
 });

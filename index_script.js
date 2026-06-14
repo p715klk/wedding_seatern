@@ -407,19 +407,42 @@ function renderTableFooterAndTitle(tableNum, guests) {
     }
 }
 
+function getNextSeatForInlineGuest(tableNum) {
+    const guests = dbData[tableNum] || [];
+    const occupiedActive = new Set();
+
+    guests.forEach(guest => {
+        const key = `${tableNum}_${guest.name}`;
+        const state = statusState[key] || {};
+        if (state.arrived === '取消') return;
+
+        const sort = parseInt(guest.sort, 10);
+        if (!isNaN(sort) && sort >= 1 && sort <= 12) {
+            occupiedActive.add(sort);
+        }
+    });
+
+    for (let i = 1; i <= 12; i++) {
+        if (!occupiedActive.has(i)) return i;
+    }
+    return 12;
+}
+
 function addNewGuestInline(tableNum) {
     const currentGuestsArray = dbData[tableNum] || [];
-    const nextIndex = currentGuestsArray.length; 
+    const nextIndex = currentGuestsArray.length;
 
     const newName = prompt("請輸入新賓客姓名 (若是眷屬，請遵循：主客姓名 眷屬 X):");
     if (!newName || newName.trim() === "") return;
     const side = prompt("男方 定 女方？", "男方");
     const group = prompt("屬於邊個分類？多個請用 | 分隔 (例如: 家人|LK)", "現場加座");
-    
+    const nextSeat = getNextSeatForInlineGuest(tableNum);
+
     database.ref(`wedding_guests/${tableNum}/${nextIndex}`).set({
         name: newName.trim(),
         side: side ? side.trim() : "男方",
-        group: normalizeGuestTags(group ? group.trim() : "現場加座")
+        group: normalizeGuestTags(group ? group.trim() : "現場加座"),
+        sort: nextSeat
     });
 }
 

@@ -1,6 +1,28 @@
 // ==========================================
 // 📌 2. Firebase 精準讀取與多重標籤解析
 // ==========================================
+let guestStatusCache = {};
+
+function resolveGuestSeatNumber(tableNum, guest, tableGuests, guestStatus) {
+    const existingSort = parseInt(guest.sort, 10);
+    if (!isNaN(existingSort) && existingSort >= 1) return existingSort;
+
+    const occupiedActive = new Set();
+    tableGuests.forEach(g => {
+        if (g === guest || !g?.name) return;
+        const key = `${tableNum}_${g.name}`;
+        if (guestStatus?.[key]?.arrived === '取消') return;
+        const sort = parseInt(g.sort, 10);
+        if (!isNaN(sort) && sort >= 1) occupiedActive.add(sort);
+    });
+
+    const maxSeats = getMaxSeatsForTable(tableNum);
+    for (let i = 1; i <= maxSeats; i++) {
+        if (!occupiedActive.has(i)) return i;
+    }
+    return 1;
+}
+
 function loadFirebaseData(forceRender = false) {
     tbody.innerHTML = `<tr><td class="text-center py-8 text-gray-400 font-bold">⏳ 正在從 Firebase 載入名單數據...</td></tr>`;
 
@@ -23,12 +45,14 @@ function loadFirebaseData(forceRender = false) {
         return Promise.all([
             database.ref('wedding_guests').once('value'),
             database.ref('unassigned_guests').once('value'),
-            database.ref('table_settings').once('value')
+            database.ref('table_settings').once('value'),
+            database.ref('guest_status').once('value')
         ]);
-    }).then(([snapshot1, snapshot2, snapshot3]) => {
+    }).then(([snapshot1, snapshot2, snapshot3, snapshot4]) => {
         const weddingGuests = snapshot1.val() || {};
         const unassignedGuests = snapshot2.val() || [];
         tableSettingsCache = snapshot3.val() || {};
+        guestStatusCache = snapshot4.val() || {};
 
         if (csvImportInProgress) return;
 
@@ -60,20 +84,21 @@ function processFirebaseData(weddingGuests, unassignedGuests) {
     // 已分配桌次賓客
     Object.keys(weddingGuests).sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach(tableNum => {
         const list = weddingGuests[tableNum];
-        if (Array.isArray(list)) {
-            list.forEach(guest => {
-                if (guest && guest.name) {
-                    const mergeKeys = window._legacyLabelKeys || labelColumnsKeys;
-                    localGuestsList.push({
-                        name: guest.name,
-                        side: guest.side || '男方',
-                        table: parseInt(tableNum), 
-                        sort: guest.sort || 1,
-                        group: mergeGuestLabelsToTags(guest, mergeKeys)
-                    });
-                }
+        if (!Array.isArray(list)) return;
+
+        const tableGuests = list.filter(g => g && g.name);
+        const tableNumInt = parseInt(tableNum, 10);
+
+        tableGuests.forEach(guest => {
+            const mergeKeys = window._legacyLabelKeys || labelColumnsKeys;
+            localGuestsList.push({
+                name: guest.name,
+                side: guest.side || '男方',
+                table: tableNumInt,
+                sort: resolveGuestSeatNumber(tableNumInt, guest, tableGuests, guestStatusCache),
+                group: mergeGuestLabelsToTags(guest, mergeKeys)
             });
-        }
+        });
     });
 
     // 未分配賓客
@@ -305,4 +330,39 @@ function importCSVAction() {
         alert('❌ 讀取 CSV 檔案失敗，請重試。');
     };
     reader.readAsText(file, 'UTF-8');
+}
+
+function shouldAutoReloadAdminRows() {
+    const active = document.activeElement;
+    if (!active) return true;
+    const tag = active.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return false;
+    return !active.closest('#custom-dialog-overlay, #delete-tag-dialog-overlay');
+}
+
+function startAdminRealtimeSync() {
+    database.ref('wedding_guests').on('value', (snapshot) => {
+        if (csvImportInProgress || !shouldAutoReloadAdminRows()) return;
+
+        Promise.all([
+            Promise.resolve(snapshot.val() || {}),
+            database.ref('unassigned_guests').once('value'),
+            database.ref('guest_status').once('value')
+        ]).then(([weddingGuests, unassignedSnap, statusSnap]) => {
+            if (csvImportInProgress || !shouldAutoReloadAdminRows()) return;
+            guestStatusCache = statusSnap.val() || {};
+            processFirebaseData(weddingGuests, unassignedSnap.val() || []);
+        });
+    });
+
+    database.ref('guest_status').on('value', (snapshot) => {
+        if (csvImportInProgress || !shouldAutoReloadAdminRows()) return;
+        guestStatusCache = snapshot.val() || {};
+        database.ref('wedding_guests').once('value').then(guestSnap => {
+            if (csvImportInProgress || !shouldAutoReloadAdminRows()) return;
+            database.ref('unassigned_guests').once('value').then(unassignedSnap => {
+                processFirebaseData(guestSnap.val() || {}, unassignedSnap.val() || []);
+            });
+        });
+    });
 }
