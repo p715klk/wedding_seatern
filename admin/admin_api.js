@@ -36,45 +36,75 @@ function resolveGuestSeatNumber(tableNum, guest, tableGuests, guestStatus) {
     return 1;
 }
 
+function applyMetaLabelColumns(meta) {
+    if (meta && meta.keys && meta.names) {
+        const legacyKeys = meta.keys;
+        const mergedPool = new Set(categoriesByColumn[PRIMARY_TAG_KEY] || []);
+        legacyKeys.forEach(k => {
+            (meta.categories?.[k] || []).forEach(c => mergedPool.add(c));
+        });
+        labelColumnsKeys = [PRIMARY_TAG_KEY];
+        labelColumnsNames = ['標籤 (可多選)'];
+        categoriesByColumn = { [PRIMARY_TAG_KEY]: [...mergedPool] };
+        window._legacyLabelKeys = legacyKeys.length > 1 ? legacyKeys : null;
+    } else {
+        window._legacyLabelKeys = null;
+    }
+}
+
+/** 只讀 admin 需要嘅節點（唔讀成個 root），初次載入會快過下載全部 guest_status 等資料 */
+function fetchAdminFirebaseBundle() {
+    return Promise.all([
+        database.ref('meta_label_columns').once('value'),
+        database.ref('wedding_guests').once('value'),
+        database.ref('unassigned_guests').once('value'),
+        database.ref('table_settings').once('value'),
+        database.ref('guest_status').once('value')
+    ]).then(([metaSnap, guestsSnap, unassignedSnap, settingsSnap, statusSnap]) => ({
+        meta_label_columns: metaSnap.val(),
+        wedding_guests: guestsSnap.val() || {},
+        unassigned_guests: unassignedSnap.val() || [],
+        table_settings: settingsSnap.val() || {},
+        guest_status: statusSnap.val() || {}
+    }));
+}
+
+function applyAdminFirebaseData(data, forceRender = false) {
+    const bundle = data || {};
+    applyMetaLabelColumns(bundle.meta_label_columns);
+    tableSettingsCache = bundle.table_settings || {};
+    guestStatusCache = bundle.guest_status || {};
+
+    if (csvImportInProgress) return;
+    if (!forceRender && !shouldAutoReloadAdminRows()) return;
+
+    processFirebaseData(bundle.wedding_guests || {}, bundle.unassigned_guests || []);
+}
+
+function refreshAdminFromFirebase(forceRender = false) {
+    return fetchAdminFirebaseBundle().then(bundle => {
+        try {
+            applyAdminFirebaseData(bundle, forceRender);
+        } catch (err) {
+            if (forceRender) showAdminLoadError(err);
+            throw err;
+        }
+    });
+}
+
+function showAdminLoadError(err) {
+    console.error('Firebase 載入失敗:', err);
+    if (!tbody) return;
+    const detail = err?.message ? `：${err.message}` : '';
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-red-500 font-bold">❌ 數據載入失敗${detail}<br><button type="button" onclick="loadFirebaseData(true)" class="mt-3 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-bold">🔄 重試</button></td></tr>`;
+}
+
 function loadFirebaseData(forceRender = false) {
-    tbody.innerHTML = `<tr><td class="text-center py-8 text-gray-400 font-bold">⏳ 正在從 Firebase 載入名單數據...</td></tr>`;
+    if (!tbody) return Promise.resolve();
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-gray-400 font-bold">⏳ 正在從 Firebase 載入名單數據...</td></tr>`;
 
-    return database.ref('meta_label_columns').once('value').then(metaSnapshot => {
-        const meta = metaSnapshot.val();
-        if (meta && meta.keys && meta.names) {
-            const legacyKeys = meta.keys;
-            const mergedPool = new Set(categoriesByColumn[PRIMARY_TAG_KEY] || []);
-            legacyKeys.forEach(k => {
-                (meta.categories?.[k] || []).forEach(c => mergedPool.add(c));
-            });
-            labelColumnsKeys = [PRIMARY_TAG_KEY];
-            labelColumnsNames = ['標籤 (可多選)'];
-            categoriesByColumn = { [PRIMARY_TAG_KEY]: [...mergedPool] };
-            window._legacyLabelKeys = legacyKeys.length > 1 ? legacyKeys : null;
-        } else {
-            window._legacyLabelKeys = null;
-        }
-
-        return Promise.all([
-            database.ref('wedding_guests').once('value'),
-            database.ref('unassigned_guests').once('value'),
-            database.ref('table_settings').once('value'),
-            database.ref('guest_status').once('value')
-        ]);
-    }).then(([snapshot1, snapshot2, snapshot3, snapshot4]) => {
-        const weddingGuests = snapshot1.val() || {};
-        const unassignedGuests = snapshot2.val() || [];
-        tableSettingsCache = snapshot3.val() || {};
-        guestStatusCache = snapshot4.val() || {};
-
-        if (csvImportInProgress) return;
-
-        if (forceRender || (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT')) {
-            processFirebaseData(weddingGuests, unassignedGuests);
-        }
-    }).catch(err => {
-        console.error("Firebase 載入失敗:", err);
-        tbody.innerHTML = `<tr><td class="text-center py-8 text-red-500 font-bold">❌ 數據載入失敗</td></tr>`;
+    return refreshAdminFromFirebase(forceRender).catch(err => {
+        showAdminLoadError(err);
         throw err;
     });
 }
@@ -545,29 +575,28 @@ function shouldAutoReloadAdminRows() {
     return !active.closest('#custom-dialog-overlay, #delete-tag-dialog-overlay, #leave-page-dialog-overlay, #csv-import-dialog-overlay');
 }
 
+let adminRealtimeActive = false;
+let adminSyncTimer = null;
+
+function scheduleAdminRealtimeRefresh() {
+    if (!adminRealtimeActive || csvImportInProgress) return;
+    clearTimeout(adminSyncTimer);
+    adminSyncTimer = setTimeout(() => {
+        refreshAdminFromFirebase(false).catch(err => {
+            console.error('Admin 即時同步失敗:', err);
+            if (tbody && !tbody.querySelector('.row-name-input')) {
+                showAdminLoadError(err);
+            }
+        });
+    }, 150);
+}
+
 function startAdminRealtimeSync() {
-    database.ref('wedding_guests').on('value', (snapshot) => {
-        if (csvImportInProgress || !shouldAutoReloadAdminRows()) return;
-
-        Promise.all([
-            Promise.resolve(snapshot.val() || {}),
-            database.ref('unassigned_guests').once('value'),
-            database.ref('guest_status').once('value')
-        ]).then(([weddingGuests, unassignedSnap, statusSnap]) => {
-            if (csvImportInProgress || !shouldAutoReloadAdminRows()) return;
-            guestStatusCache = statusSnap.val() || {};
-            processFirebaseData(weddingGuests, unassignedSnap.val() || []);
-        });
+    ['wedding_guests', 'unassigned_guests', 'guest_status', 'meta_label_columns'].forEach((path) => {
+        database.ref(path).on('value', scheduleAdminRealtimeRefresh);
     });
+}
 
-    database.ref('guest_status').on('value', (snapshot) => {
-        if (csvImportInProgress || !shouldAutoReloadAdminRows()) return;
-        guestStatusCache = snapshot.val() || {};
-        database.ref('wedding_guests').once('value').then(guestSnap => {
-            if (csvImportInProgress || !shouldAutoReloadAdminRows()) return;
-            database.ref('unassigned_guests').once('value').then(unassignedSnap => {
-                processFirebaseData(guestSnap.val() || {}, unassignedSnap.val() || []);
-            });
-        });
-    });
+function enableAdminRealtimeSync() {
+    adminRealtimeActive = true;
 }

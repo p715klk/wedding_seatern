@@ -663,9 +663,9 @@ function refreshRowSequenceNumbersOnly() {
 }
 
 function recalculateSortNumbersFromDOM() {
-    // 只更新「順序」欄（名單第幾行），唔好改動「桌次座位」實際 seat 編號。
-    // 否則有留空位（例如 1、2、6–12）或簽到已取消釋放位時，會被壓成 1、2、3…
     refreshRowSequenceNumbersOnly();
+    // 拖動後按 DOM 順序重排各枱座位；已取消賓客會被略過，保留「已釋放」顯示
+    reassignSeatsByDomOrderPerTable();
 }
 
 function openLeavePageDialog(href) {
@@ -933,6 +933,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     reinitTableSortable();
     setupAdminLeaveGuard();
-    loadFirebaseData();
     startAdminRealtimeSync();
+    loadFirebaseData(true).finally(() => enableAdminRealtimeSync());
+});
+
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted && typeof loadFirebaseData === 'function') {
+        loadFirebaseData(true);
+    }
 });
