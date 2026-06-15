@@ -2,6 +2,128 @@
 
 > 由「單一婚宴工具」變成「可賣俾多對新人／婚禮統籌」嘅 SaaS / 服務
 
+**域名目標：** `https://theweddingseat.com/p/{slug}`（例如 `chen-wong_20260915`）
+
+---
+
+## 0. 第一步：Copy Project + 新 Firebase（你而家應該做嘅嘢）
+
+> 你計劃：copy 呢個 project 去新 repo + 開新 Firebase project。以下係建議順序，**唔使買 server，唔使每個客戶開一個 GitHub repo**。
+
+### 0.1 先搞清楚兩樣嘢放邊
+
+| 放咩 | 放邊 | 備註 |
+|------|------|------|
+| **網站 code**（HTML/JS/CSS） | **一個** GitHub repo | 全部客戶共用；`git push` 一次，所有人用新版 |
+| **客戶 project 資料**（賓客、枱位、新人名） | **Firebase RTDB** `tenants/{slug}/...` | 唔係 GitHub repo；買咗服務 = Firebase 加一個 tenant |
+
+```
+❌ 唔好：客戶 A → repo A、客戶 B → repo B（難維護）
+✅ 要咁：一個 repo + 一個 Firebase → 用 URL slug 分客戶
+```
+
+### 0.2 Week 1 行動清單（按順序做）
+
+#### Step 1 — Fork / Copy 專案
+
+- [ ] Copy `wedding_seat` 去新 folder 或新 GitHub repo（例如 `theweddingseat-platform`）
+- [ ] **保留舊 repo 做個人婚禮用**；新 repo 專做商業版，兩邊唔好混
+- [ ] 刪走或 `.gitignore` 舊 Firebase 憑證／敏感資料
+- [ ] 更新 README：標明呢個係 platform 版
+
+#### Step 2 — 開新 Firebase Project
+
+- [ ] [Firebase Console](https://console.firebase.google.com/) → Create project（例如 `theweddingseat-prod`）
+- [ ] Region 選 **asia-southeast1**（同而家一致）
+- [ ] 開 **Realtime Database**（唔係 Firestore）
+- [ ] 開 **Authentication** → Email/Password（後台 login 用）
+- [ ] 記低新 `databaseURL`，之後取代 4 個檔案入面寫死嘅舊 URL：
+  - `index_script.js`
+  - `admin/admin_config.js`
+  - `admin/seating.js`
+  - `admin/admin.js`（如有用）
+
+#### Step 3 — 集中 Firebase config（做一次就得）
+
+- [ ] 新增 `js/firebase_config.js`（或 `shared/firebase_config.js`），**只喺呢度**寫 `databaseURL`
+- [ ] 所有頁面 `<script src="...firebase_config.js">` 引用佢
+- [ ] 之後換環境（dev/prod）只改一個檔
+
+#### Step 4 — 加 `tenant_bootstrap.js`（最關鍵一步）
+
+- [ ] 新增 `js/tenant_bootstrap.js`，負責：
+  - 從 URL 讀 `slug`（`/p/chen-wong_20260915` 或 local dev 用 `?slug=demo`）
+  - 提供 `tenantRef('wedding_guests')` → 自動加 prefix `tenants/{slug}/`
+  - 載入 `tenants/{slug}/meta`，檢查 `status`（active / expired）
+- [ ] **本地開發**：暫時用 `?slug=demo` 或固定 `demo`，唔使即刻搞 SPA routing
+
+#### Step 5 — 手動建立第一個測試 tenant
+
+喺 Firebase Console 直接加（未寫 Super Admin 前）：
+
+```json
+// tenants/demo/meta
+{
+  "couple_names": "測試新人",
+  "venue_name": "測試酒店",
+  "venue_hall": "Grand Hall",
+  "wedding_date": "2026-12-01",
+  "theme_color": "#b91c1c",
+  "status": "active",
+  "slug": "demo"
+}
+
+// slugs/demo → "demo"（slug 查詢用，之後可改 UUID）
+```
+
+- [ ] 將而家 root 嘅 `wedding_guests`、`table_settings` 等 **搬入** `tenants/demo/`（可用 export/import 或 `scripts/migrate-to-tenant.js`）
+- [ ] 改 frontend 全部 `database.ref('wedding_guests')` → 經 `tenantRef('wedding_guests')`
+
+#### Step 6 — 動態 branding（快見效）
+
+- [ ] `index.html` header 唔再寫死新人名／酒店；由 `meta` JS render
+- [ ] 移除點名頁公開嘅「後台管理」連結（或改為要 login 先見）
+
+#### Step 7 — Firebase Security Rules（基本版）
+
+- [ ] RTDB Rules：未 login 只可以讀 `tenants/{slug}/meta` + 寫 `guest_status`（點名）
+- [ ] 寫 `wedding_guests` / `table_settings` 要 Auth
+- [ ] **測試**：用兩個 slug 確認 A 睇唔到 B 資料
+
+#### Step 8 — Deploy 靜態站（無 server）
+
+- [ ] Push 去 GitHub → 開 **GitHub Pages** 或 **Cloudflare Pages**（免費）
+- [ ] 加 `404.html`（copy `index.html`）做 SPA fallback，令 `/p/demo` 唔會 404
+- [ ] 買域名 `theweddingseat.com` → DNS CNAME 指向 Pages
+- [ ] **GitHub Pro 唔急買**；免費 tier 夠做 MVP
+
+#### Step 9 — 驗收第一個 milestone
+
+- [ ] `https://theweddingseat.com/p/demo` 點名正常
+- [ ] `/p/demo/admin` 後台改賓客 → 點名頁即時 sync
+- [ ] 開第二個 slug `demo2`，確認資料完全隔離
+
+### 0.3 第一步 **唔使做** 嘅嘢（避免分心）
+
+| 暫時唔使 | 原因 |
+|----------|------|
+| Stripe 計費 | 未有第一個付費客戶 |
+| 每客戶一個 GitHub repo | 完全唔需要 |
+| 自己租 VPS / server | GitHub Pages + Firebase 夠 |
+| Firebase Cloud Functions | 客少時手動喺 Console 開 tenant 就得 |
+| 自訂 domain 以外嘅複雜 routing | 先搞掂 `?slug=demo`，再上 `/p/{slug}` |
+
+### 0.4 建議本地開發順序（務實）
+
+```
+Phase 0a（1–2 天）  新 Firebase + 集中 config + 手動 tenants/demo 資料
+Phase 0b（3–5 天）  tenant_bootstrap.js + 改晒所有 database.ref
+Phase 0c（1–2 天）  meta 動態 header + 移除公開 admin link
+Phase 0d（1 天）    Security Rules 基本版
+Phase 0e（1 天）    GitHub Pages deploy + 404 fallback
+Phase 0f（之後）    正式 /p/{slug} URL + 買 domain + Super Admin 頁
+```
+
 ---
 
 ## 1. 而家嘅現狀（基線）
@@ -28,9 +150,10 @@
     │     └── [一鍵建立新 Project] → 自動 provision DB + 預設資料 + 專屬 URL
     │
     ├── Customer A（新人 A）
-    │     ├── 點名頁：https://a.yourdomain.com 或 /p/abc123
-    │     ├── 後台：admin + seating（只有授權用戶可入）
-    │     └── 可改：新人名、酒店、枱數、標籤、平面圖等
+    │     ├── 點名頁：https://theweddingseat.com/p/chen-wong_20260915
+    │     ├── 後台：https://theweddingseat.com/p/chen-wong_20260915/admin
+    │     ├── 畫布：https://theweddingseat.com/p/chen-wong_20260915/seating
+    │     └── 可改：新人名、酒店、枱數、標籤、平面圖等（存 Firebase，唔使 redeploy）
     │
     └── Customer B（新人 B）
           └── 完全獨立資料，互不可見
@@ -84,21 +207,19 @@
 
 ---
 
-### 3.2 Backend API（一鍵開 project）
+### 3.2 開新 Project（一鍵 provision）
 
-**一定要有 server**，唔可以只靠前端 Firebase，因為：
+開新 tenant 需要 **Admin 權限**（API key 唔可以放喺 browser）。**唔使自己租 server**，可以用 serverless：
 
-- 開新 tenant 需要 **Admin 權限**（API key 唔可以放喺 browser）
-- 計費、停用帳號、備份都要 server 做
-- Auth token 要同 tenant 綁定
+| 階段 | 做法 | 你要做咩 |
+|------|------|----------|
+| **MVP（而家）** | Firebase Console 手動加 `tenants/{slug}` | 客少時夠用；WhatsApp 收錢後你手動開 |
+| **早期** | Firebase Cloud Functions | 一個 function：`createTenant(slug, meta)` |
+| **規模化** | Cloud Functions + Stripe webhook | 付款自動開 tenant + 發 email |
 
-**建議技術棧（擇一）：**
+**傳統 Node server 係可選，唔係必須。**
 
-- Node.js + Express/Fastify + Firebase Admin SDK
-- 或 Supabase Edge Functions + Postgres
-- 或 Cloudflare Workers + D1
-
-**核心 API 清單：**
+**核心 API 清單（Cloud Functions 或日後 backend）：**
 
 | Endpoint | 用途 |
 |----------|------|
@@ -119,7 +240,18 @@
 4. 寫入預設 meta_label_columns（標籤欄）
 5. 建立 Firebase Auth 用戶（新人 / 統籌 email）
 6. 發送 onboarding email（登入連結 + 教學）
-7. 回傳專屬 URL：https://app.yourservice.com/p/chen-wong-2026
+7. 回傳專屬 URL：https://theweddingseat.com/p/chen-wong_20260915
+```
+
+**有人買咗之後嘅實際 flow：**
+
+```
+1. 客戶付款（Stripe / 轉數 / 你手動開都得）
+2. 你（或 webhook）喺 Firebase 建立 tenants/{slug}/meta + 空資料
+3. 發俾客戶兩條 link：
+   - 點名：https://theweddingseat.com/p/chen-wong_20260915
+   - 後台：https://theweddingseat.com/p/chen-wong_20260915/admin
+4. 客戶改資料 → 寫入 Firebase → 即時生效，唔使 redeploy
 ```
 
 ---
@@ -145,14 +277,35 @@
 
 | 類型 | URL 範例 | 誰用 |
 |------|----------|------|
-| 點名頁（公開／半公開） | `/p/{slug}` | MC、帶位同事 |
-| 後台 | `/p/{slug}/admin` | 新人、統籌 |
-| 畫布排位 | `/p/{slug}/seating` | 統籌 |
-| Super Admin | `/super/tenants` | 只有你 |
+| 點名頁（公開／半公開） | `/p/chen-wong_20260915` | MC、帶位同事 |
+| 後台 | `/p/chen-wong_20260915/admin` | 新人、統籌（要 login） |
+| 畫布排位 | `/p/chen-wong_20260915/seating` | 統籌（要 login） |
+| Super Admin | `/super` 或 `/super/tenants` | 只有你 |
 
-`slug` 由 backend 喺 provision 時生成；`tenantId` 用 UUID 放 DB 入面。
+**Slug 格式建議：**
 
-**可選升級：** 自訂 domain（`wedding.chen.com`）— 要 DNS + SSL 自動化，可以 Phase 3 先做。
+| 格式 | 例子 | 備註 |
+|------|------|------|
+| ✅ 推薦 | `chen-wong_20260915` | 拼音 + 日期；短、易 share |
+| ✅ 最安全 | `x7k2m9` | 隨機；頁面顯示名從 `meta.couple_names` 讀 |
+| ⚠️ 慎用 | `陳大文_李小美_20260915` | 中文 URL 會變 `%E9%99%B3...`，好長 |
+| ❌ 避免 | 只用姓名無日期 | 同名新人會撞 slug |
+
+`slug` 喺 provision 時生成；`tenantId` 可用 UUID 放 DB，`slugs/{slug}` 做查詢索引。
+
+**Frontend 讀 slug：**
+
+```javascript
+// pathname = /p/chen-wong_20260915/admin
+const parts = window.location.pathname.split('/').filter(Boolean);
+const slug = parts[1];                    // chen-wong_20260915
+const page = parts[2] || 'checkin';       // checkin | admin | seating
+
+// 本地 dev 暫用：?slug=demo
+const devSlug = new URLSearchParams(location.search).get('slug');
+```
+
+**靜態 host 點 handle `/p/xxx`：** GitHub Pages / Cloudflare Pages 本身冇 server routing，要用 SPA fallback（見 §3.11）。
 
 ---
 
@@ -250,28 +403,80 @@ Firebase config 可以共用一個 project，只改 path prefix。
 
 ---
 
-### 3.10 DevOps / 部署
+### 3.10 DevOps / 部署（無 server 方案）
 
-| 現況 | 目標 |
-|------|------|
-| 可能係靜態 host | 前端：Vercel / Cloudflare Pages |
-| 無 CI | GitHub Actions：lint + test + deploy |
-| 無環境分離 | `dev` / `staging` / `prod` 三套 Firebase |
+| 項目 | 建議 | 成本 |
+|------|------|------|
+| **前端 host** | GitHub Pages 或 Cloudflare Pages | 免費 |
+| **Code repo** | 一個 GitHub repo（唔係每客戶一個） | 免費；Pro 唔急買 |
+| **資料庫** | Firebase RTDB（新 project） | Spark 免費起步；用量大先 Blaze |
+| **域名** | `theweddingseat.com` | ~USD 10–15/年 |
+| **開 tenant** | 初期手動；之後 Cloud Functions | Functions 用量少幾乎免費 |
+| **CI** | GitHub Actions：`push main` → deploy | 免費 tier 夠 MVP |
 
-Backend 同 frontend 分開 deploy；環境變數用 secret manager，唔好 commit API key。
+Backend 同 frontend 分開 deploy；環境變數用 GitHub Secrets，**唔好 commit Firebase Admin key**。
+
+### 3.11 Hosting、Link 同 GitHub（零 server 架構）
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  theweddingseat.com                                       │
+│  DNS → GitHub Pages / Cloudflare Pages（免費、無 VPS）    │
+│  一個 repo deploy 一次 → serve 全部 /p/* link             │
+└────────────────────────────┬─────────────────────────────┘
+                             │ 瀏覽器載入 JS
+                             ▼
+┌──────────────────────────────────────────────────────────┐
+│  Firebase RTDB（新 project）                              │
+│  tenants/chen-wong_20260915/wedding_guests/...          │
+│  tenants/chen-wong_20260915/meta/...                      │
+│  slugs/chen-wong_20260915 → tenantId                      │
+│  Firebase Auth（後台 login）                              │
+└──────────────────────────────────────────────────────────┘
+```
+
+**GitHub Pages SPA routing（`/p/xxx` 唔 404）：**
+
+- 將 `index.html` copy 做 `404.html`；未知 path 會 fallback 載入 SPA，再由 JS parse slug
+- 或改用 **Cloudflare Pages**：加 `_redirects` 檔：`/*  /index.html  200`
+
+**域名設定：**
+
+1. 買 `theweddingseat.com`
+2. DNS：`www` CNAME → `yourusername.github.io`（GitHub Pages）
+3. GitHub repo → Settings → Pages → Custom domain
+4. Apex domain（無 www）用 Cloudflare DNS 會較易
+
+**GitHub Pro 要唔要？**
+
+| 功能 | 需要嗎 |
+|------|--------|
+| Private repo | 可選；public repo + Pages 已夠 |
+| 更多 Actions minutes | MVP 免費版通常夠 |
+| 同 `/p/{slug}` hosting 關係 | **唔大；唔使為呢個買 Pro** |
 
 ---
 
 ## 4. 建議實施階段
 
+### Phase 0 — 新 Repo + 新 Firebase（1–2 週）← **你而家喺呢度**
+
+- [ ] Copy project 去新 repo（同舊婚禮 repo 分開）
+- [ ] 開新 Firebase project（asia-southeast1）
+- [ ] 集中 `firebase_config.js`；換晒舊 `databaseURL`
+- [ ] 加 `tenant_bootstrap.js` + `tenants/demo` 測試資料
+- [ ] 改晒所有 `database.ref` 用 tenant path
+- [ ] `meta` 動態 branding；移除公開 admin link
+- [ ] 基本 Security Rules
+- [ ] GitHub Pages deploy + `404.html` fallback
+
 ### Phase 1 — 可賣第一個客戶（4–6 週）
 
-- [ ] Backend：CRUD tenant + provision 預設資料
-- [ ] 資料搬到 `tenants/{id}/...`
-- [ ] Firebase Auth + 基本 login
-- [ ] `meta` 動態 branding（新人、酒店）
-- [ ] Super Admin 一頁：列表 + 「新增 Project」掣
-- [ ] 點名頁移除公開 admin 連結
+- [ ] 買域名 `theweddingseat.com` + 接 GitHub Pages
+- [ ] 正式 `/p/{slug}` URL（唔再只靠 `?slug=demo`）
+- [ ] Super Admin 最小頁：列表 + 手動「新增 Project」
+- [ ] Firebase Auth + 後台 login
+- [ ] 開第二個真實 slug 測試隔離
 
 ### Phase 2 — 可以規模化（6–10 週）
 
@@ -307,39 +512,50 @@ Backend 同 frontend 分開 deploy；環境變數用 secret manager，唔好 com
 
 | 問題 | 建議 |
 |------|------|
-| 繼續用 Firebase？ | MVP 可以；中期加 Backend API 包住 Admin 操作 |
-| 需唔需要重寫 frontend？ | 唔使；加 tenant bootstrap 層就得 |
-| 一個 Firebase project 定多個？ | 起步一個 + path 隔離；大客戶可升級獨立 project |
-| Realtime 點名仲要快？ | 保留 RTDB；只收窄 listen 範圍到 `tenants/{id}` |
-| 現有 `repair-firebase-data.js` | 變成 backend 嘅 migration / repair tool |
+| 繼續用 Firebase？ | ✅ 是；copy 後開**新** Firebase project，同舊婚禮資料分開 |
+| 要自己租 server 嗎？ | ❌ 唔使；GitHub Pages + Firebase 夠 MVP |
+| 每個客戶一個 GitHub repo？ | ❌ 唔使；一個 repo + Firebase `tenants/{slug}` |
+| 要唔要 GitHub Pro？ | 唔急；免費 tier 夠 deploy |
+| 需唔需要重寫 frontend？ | 唔使；加 `tenant_bootstrap.js` 就得 |
+| 一個 Firebase project 定多個？ | 平台用一個 + path 隔離；舊婚禮保留舊 project |
+| Realtime 點名仲要快？ | 保留 RTDB；listen 範圍收窄到 `tenants/{slug}` |
+| 開 tenant 點做？ | 初期 Firebase Console 手動；之後 Cloud Functions |
 
 ---
 
-## 7. 最小可行 Backend 架構圖
+## 7. 零 Server 架構圖（推薦起步方案）
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Super Admin UI │────▶│  Your Backend    │────▶│ Firebase RTDB   │
-│  (React/Vue)    │     │  Node + Admin SDK│     │ tenants/{id}/…  │
-└─────────────────┘     └────────┬─────────┘     └────────▲────────┘
-                                 │                        │
-┌─────────────────┐              │ Stripe webhook           │ realtime
-│  Customer Pages │──────────────┘                          │
-│  index/admin/   │  Auth token ───────────────────────────┘
-│  seating        │  (Firebase Auth)
-└─────────────────┘
+┌─────────────────┐                              ┌─────────────────┐
+│  GitHub Repo    │  git push → GitHub Actions   │  GitHub Pages   │
+│  （一個）        │ ───────────────────────────▶ │  theweddingseat │
+│  HTML/JS/CSS    │                              │  .com/p/{slug}  │
+└─────────────────┘                              └────────┬────────┘
+                                                          │
+┌─────────────────┐     手動 / Cloud Function          │ JS + Auth
+│  Super Admin    │ ───────────────────────────▶         ▼
+│  （你撳掣開 tenant）│                              ┌─────────────────┐
+└─────────────────┘                              │  Firebase RTDB  │
+                                                 │  tenants/…      │
+                                                 └─────────────────┘
 ```
+
+日後加 Stripe webhook → 同一個 Cloud Function 自動開 tenant，仍然唔使自己租 VPS。
 
 ---
 
-## 8. Codebase 改動優先次序
+## 8. Codebase 改動優先次序（對應 Phase 0）
 
-1. **抽出 `tenant_bootstrap`** — 所有頁面共用，解析 slug
-2. **統一 Firebase path** — 唔好再 `ref('wedding_guests')` 寫死 root
-3. **新增 `project_meta` 節點** — 取代 HTML hardcode
-4. **Backend provision script** — 手動 call API 開第一個測試 tenant
-5. **Auth + 隱藏 admin 入口**
-6. **Super Admin 最小 UI** — 一個 table + Create button 已夠試賣
+1. **新 Firebase project** + 集中 `firebase_config.js`（取代 4 處寫死 URL）
+2. **`tenant_bootstrap.js`** — 解析 slug、提供 `tenantRef()`
+3. **Firebase 手動建 `tenants/demo`** — 搬現有資料入去
+4. **改晒 `database.ref`** — `index_script.js`、`admin_api.js`、`seating.js`
+5. **`meta` 動態 header** — 取代 `index.html` hardcode
+6. **移除公開 admin link** + 基本 Security Rules
+7. **GitHub Pages + `404.html`** — 本地先用 `?slug=demo` 開發
+8. **Super Admin 頁** — Phase 1 先做最小版
+9. **買 domain + `/p/{slug}`** — Phase 1
+10. **Cloud Functions `createTenant`** — 有付費客戶後
 
 ---
 
@@ -353,4 +569,4 @@ Backend 同 frontend 分開 deploy；環境變數用 secret manager，唔好 com
 
 ---
 
-*最後更新：2026-06-15*
+*最後更新：2026-06-15（加 §0 第一步清單、§3.11 Hosting/GitHub、零 server 架構）*
