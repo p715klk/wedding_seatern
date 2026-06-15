@@ -754,7 +754,7 @@ function confirmLeaveAdminPage(action) {
     }
 
     if (action === 'save') {
-        const navigateAfterMs = href ? Math.min(1200, ADMIN_SAVE_TOAST_MS) : 0;
+        const navigateAfterMs = href ? Math.min(600, ADMIN_SAVE_TOAST_MS) : 0;
         saveAllToFirebase(getAdminSaveSuccessOptions({ reloadAfterSave: false }))
             .then(() => {
                 if (href) {
