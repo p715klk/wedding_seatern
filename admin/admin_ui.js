@@ -969,11 +969,28 @@ function closeCSVImportDialog(isConfirm) {
     applyConfirmedCSVImport(plan).catch(() => {});
 }
 
+function toggleSettingsMenu(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('settings-menu');
+    if (!menu) return;
+    menu.classList.toggle('hidden');
+}
+
+function closeSettingsMenu() {
+    const menu = document.getElementById('settings-menu');
+    if (menu) menu.classList.add('hidden');
+}
+
 function setupAdminLeaveGuard() {
     if (!tbody) return;
 
     tbody.addEventListener('input', markAdminDirty);
     tbody.addEventListener('change', markAdminDirty);
+
+    document.addEventListener('click', (e) => {
+        const dropdown = document.getElementById('settings-dropdown');
+        if (dropdown && !dropdown.contains(e.target)) closeSettingsMenu();
+    });
 
     document.addEventListener('click', (e) => {
         const link = e.target.closest('a[href]');

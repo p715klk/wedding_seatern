@@ -295,6 +295,20 @@ function openCSVFilePicker() {
     fileInput.click();
 }
 
+function emptyAllGuests() {
+    if (typeof closeSettingsMenu === 'function') closeSettingsMenu();
+    if (!localGuestsList.length) {
+        if (typeof showAdminToast === 'function') showAdminToast('目前沒有賓客可清空', 2000);
+        return;
+    }
+    const count = localGuestsList.length;
+    const ok = confirm(`確定要清空所有賓客嗎？\n\n將移除 ${count} 位賓客，需按「儲存變更」才會同步到 Firebase。`);
+    if (!ok) return;
+    localGuestsList = [];
+    renderDOMRows();
+    markAdminDirty();
+}
+
 function parseImportedGuestFromCSVRow(parts, colMap) {
     const clean = (idx) => {
         if (idx == null || idx < 0) return '';
