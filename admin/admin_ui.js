@@ -683,9 +683,9 @@ function refreshRowSequenceNumbersOnly() {
 }
 
 function recalculateSortNumbersFromDOM() {
+    // 拖動只更新「順序」欄（後台名單第幾行），唔改「桌次座位」編號。
+    // 若重排成 1、2、3… 會填滿簽到已釋放嘅空位（例如 5、6、7），畫布排位會錯。
     refreshRowSequenceNumbersOnly();
-    // 拖動後按 DOM 順序重排各枱座位；已取消賓客會被略過，保留「已釋放」顯示
-    reassignSeatsByDomOrderPerTable();
 }
 
 function openLeavePageDialog(href) {
