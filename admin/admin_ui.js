@@ -498,8 +498,15 @@ function reinitTableSortable() {
             preventOnFilter: true,
             animation: 150,
             ghostClass: 'sortable-ghost',
-            onEnd: function () {
-                recalculateSortNumbersFromDOM();
+            onEnd: function (evt) {
+                const affectedTables = [];
+                const item = evt?.item;
+                const tableInput = item?.querySelector('.row-table-input');
+                if (tableInput) {
+                    const tVal = tableInput.value.trim();
+                    if (tVal !== '' && !isNaN(tVal)) affectedTables.push(parseInt(tVal, 10));
+                }
+                recalculateSortNumbersFromDOM(affectedTables);
                 markAdminDirty();
             }
         });
@@ -652,27 +659,58 @@ function setSeatValueForRow(row, tableNum, seatNum) {
     txtCell.innerHTML = buildSeatCellContent(tableNum, seatVal);
 }
 
-function reassignSeatsByDomOrderPerTable() {
-    const tableSeatCounter = {};
-
+function getTableRowsInDomOrder(tableNum) {
+    const rows = [];
     tbody.querySelectorAll('tr').forEach(row => {
         if (!row.querySelector('.row-name-input')) return;
-        if (isCanceledAdminRow(row)) return;
-
         const tableInput = row.querySelector('.row-table-input');
-        const txtCell = row.querySelector('.row-seat-txt-cell');
-        if (!tableInput || !txtCell) return;
-
+        if (!tableInput) return;
         const tVal = tableInput.value.trim();
-        if (tVal === '' || isNaN(tVal)) {
-            txtCell.innerHTML = '<span class="text-gray-400">未安排</span>';
-            return;
-        }
-
-        const tableNum = parseInt(tVal, 10);
-        tableSeatCounter[tableNum] = (tableSeatCounter[tableNum] || 0) + 1;
-        setSeatValueForRow(row, tableNum, tableSeatCounter[tableNum]);
+        if (tVal === '' || isNaN(tVal) || parseInt(tVal, 10) !== tableNum) return;
+        rows.push(row);
     });
+    return rows;
+}
+
+function getReservedSeatsForTable(tableNum) {
+    const reserved = new Set();
+    tbody.querySelectorAll('tr').forEach(row => {
+        if (!isCanceledAdminRow(row)) return;
+        const tableInput = row.querySelector('.row-table-input');
+        if (!tableInput) return;
+        const tVal = tableInput.value.trim();
+        if (tVal === '' || isNaN(tVal) || parseInt(tVal, 10) !== tableNum) return;
+        const preserved = parseInt(row.dataset.preservedSort, 10);
+        if (!isNaN(preserved) && preserved >= 1) reserved.add(preserved);
+    });
+    return reserved;
+}
+
+function getAssignableSeatsForTable(tableNum, reservedSeats) {
+    const maxSeats = getMaxSeatsForTable(tableNum);
+    const limit = Math.min(maxSeats, ABSOLUTE_MAX_SEATS_PER_TABLE);
+    const seats = [];
+    for (let i = 1; i <= limit; i++) {
+        if (!reservedSeats.has(i)) seats.push(i);
+    }
+    return seats;
+}
+
+function reassignSeatsForTable(tableNum) {
+    const reserved = getReservedSeatsForTable(tableNum);
+    const assignable = getAssignableSeatsForTable(tableNum, reserved);
+    const activeRows = getTableRowsInDomOrder(tableNum).filter(row => !isCanceledAdminRow(row));
+
+    activeRows.forEach((row, i) => {
+        const seatNum = assignable[i] ?? assignable[assignable.length - 1] ?? 1;
+        setSeatValueForRow(row, tableNum, seatNum);
+    });
+}
+
+function reassignSeatsForTables(tableNums) {
+    if (!tableNums?.length) return;
+    [...new Set(tableNums.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n >= 1))]
+        .forEach(tableNum => reassignSeatsForTable(tableNum));
 }
 
 function refreshRowSequenceNumbersOnly() {
@@ -682,10 +720,10 @@ function refreshRowSequenceNumbersOnly() {
     });
 }
 
-function recalculateSortNumbersFromDOM() {
-    // 拖動只更新「順序」欄（後台名單第幾行），唔改「桌次座位」編號。
-    // 若重排成 1、2、3… 會填滿簽到已釋放嘅空位（例如 5、6、7），畫布排位會錯。
+function recalculateSortNumbersFromDOM(affectedTableNums = null) {
     refreshRowSequenceNumbersOnly();
+    // 只重排被拖動嗰枱嘅座位；跳過簽到已釋放嘅空位，唔會連帶改其他枱。
+    if (affectedTableNums?.length) reassignSeatsForTables(affectedTableNums);
 }
 
 function openLeavePageDialog(href) {

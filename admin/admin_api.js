@@ -230,11 +230,14 @@ function saveAllToFirebase(options = {}) {
         database.ref('unassigned_guests').set(newUnassignedGuests)
     ]).then(() => {
         markAdminClean();
+        if (successMessage) {
+            if (successAutoDismissMs && typeof showAdminToast === 'function') {
+                showAdminToast(successMessage, successAutoDismissMs);
+            } else {
+                alert(successMessage);
+            }
+        }
         if (reloadAfterSave) return loadFirebaseData(true);
-    }).then(() => {
-        if (!successMessage) return;
-        if (successAutoDismissMs) showAdminToast(successMessage, successAutoDismissMs);
-        else alert(successMessage);
     }).catch(err => {
         alert("❌ 儲存失敗: " + err.message);
         throw err;
