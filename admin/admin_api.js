@@ -230,14 +230,15 @@ function saveAllToFirebase(options = {}) {
         database.ref('unassigned_guests').set(newUnassignedGuests)
     ]).then(() => {
         markAdminClean();
+        const useToast = successMessage && successAutoDismissMs && typeof showAdminToast === 'function';
         if (successMessage) {
-            if (successAutoDismissMs && typeof showAdminToast === 'function') {
-                showAdminToast(successMessage, successAutoDismissMs);
-            } else {
-                alert(successMessage);
-            }
+            if (useToast) showAdminToast(successMessage, successAutoDismissMs);
+            else alert(successMessage);
         }
-        if (reloadAfterSave) return loadFirebaseData(true);
+        if (reloadAfterSave) {
+            const reloadDelay = useToast ? 80 : 0;
+            return new Promise(resolve => setTimeout(resolve, reloadDelay)).then(() => loadFirebaseData(true));
+        }
     }).catch(err => {
         alert("❌ 儲存失敗: " + err.message);
         throw err;
@@ -525,10 +526,10 @@ function applyConfirmedCSVImport(plan) {
     const assignedTables = plan.resultGuests.map((g) => g.table).filter((t) => t !== '' && t != null);
     const focusTable = assignedTables.length ? assignedTables[assignedTables.length - 1] : null;
 
-    return saveAllToFirebase({
+    return saveAllToFirebase(getAdminSaveSuccessOptions({
         successMessage: buildCSVImportSuccessMessage(plan),
         reloadAfterSave: true
-    }).then(() => {
+    })).then(() => {
         if (focusTable) scrollToTableInList(focusTable);
     }).finally(() => {
         csvImportInProgress = false;

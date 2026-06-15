@@ -7,14 +7,20 @@ function showAdminToast(message, durationMs = 2000) {
     const toast = document.getElementById('admin-toast');
     if (!toast || !message) return;
 
+    if (document.activeElement?.blur) document.activeElement.blur();
+
     clearTimeout(adminToastTimer);
     toast.textContent = message;
-    toast.classList.remove('hidden');
-    requestAnimationFrame(() => toast.classList.add('is-visible'));
+    toast.classList.remove('hidden', 'is-visible');
+    // 強制 reflow + 雙 rAF，避免手機瀏覽器跳過淡入動畫（opacity 一直係 0）
+    void toast.offsetWidth;
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => toast.classList.add('is-visible'));
+    });
 
     adminToastTimer = setTimeout(() => {
         toast.classList.remove('is-visible');
-        setTimeout(() => toast.classList.add('hidden'), 250);
+        setTimeout(() => toast.classList.add('hidden'), 300);
     }, durationMs);
 }
 
@@ -748,11 +754,12 @@ function confirmLeaveAdminPage(action) {
     }
 
     if (action === 'save') {
-        saveAllToFirebase({ reloadAfterSave: false })
+        const navigateAfterMs = href ? Math.min(1200, ADMIN_SAVE_TOAST_MS) : 0;
+        saveAllToFirebase(getAdminSaveSuccessOptions({ reloadAfterSave: false }))
             .then(() => {
-                markAdminClean();
-                if (href) window.location.href = href;
-                else alert('✅ 已儲存變更');
+                if (href) {
+                    setTimeout(() => { window.location.href = href; }, navigateAfterMs);
+                }
             })
             .catch(() => {});
     }

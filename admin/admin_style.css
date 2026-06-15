@@ -301,10 +301,10 @@ html, body {
 
 .admin-toast {
     position: fixed;
-    top: 1rem;
+    top: max(1rem, env(safe-area-inset-top, 0px));
     left: 50%;
     transform: translateX(-50%) translateY(-0.5rem);
-    z-index: 10000;
+    z-index: 100000;
     max-width: min(92vw, 28rem);
     padding: 0.75rem 1.25rem;
     border-radius: 0.75rem;
@@ -318,9 +318,30 @@ html, body {
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.25s ease, transform 0.25s ease;
+    -webkit-transform: translateX(-50%) translateY(-0.5rem);
 }
 
 .admin-toast.is-visible {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+    -webkit-transform: translateX(-50%) translateY(0);
+}
+
+@media screen and (max-width: 768px) {
+    .admin-toast {
+        top: auto;
+        bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+        left: 50%;
+        right: auto;
+        max-width: calc(100vw - 2rem);
+        padding: 0.875rem 1rem;
+        font-size: 0.875rem;
+        transform: translateX(-50%) translateY(0.75rem);
+        -webkit-transform: translateX(-50%) translateY(0.75rem);
+    }
+
+    .admin-toast.is-visible {
+        transform: translateX(-50%) translateY(0);
+        -webkit-transform: translateX(-50%) translateY(0);
+    }
 }

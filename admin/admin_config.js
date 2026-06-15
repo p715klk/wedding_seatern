@@ -151,6 +151,18 @@ let pendingCSVImportData = null;
 let adminHasUnsavedChanges = false;
 let pendingLeaveHref = null;
 
+const ADMIN_SAVE_SUCCESS_MESSAGE = '✨ 【後台數據同步成功】！已完美推送至畫布。';
+const ADMIN_SAVE_TOAST_MS = 2000;
+
+function getAdminSaveSuccessOptions(overrides = {}) {
+    return {
+        successMessage: ADMIN_SAVE_SUCCESS_MESSAGE,
+        successAutoDismissMs: ADMIN_SAVE_TOAST_MS,
+        reloadAfterSave: true,
+        ...overrides
+    };
+}
+
 function isAdminPageDirty() {
     return adminHasUnsavedChanges;
 }
