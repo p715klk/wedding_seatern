@@ -24,7 +24,7 @@
                 <button onclick="addNewGuestRow()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition">
                     ➕ 新增賓客
                 </button>
-                <button id="btn-save-all" onclick="saveAllToFirebase({ successMessage: '✨ 【後台數據同步成功】！已完美推送至畫布。' })" class="bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow transition">
+                <button id="btn-save-all" onclick="saveAllToFirebase({ successMessage: '✨ 【後台數據同步成功】！已完美推送至畫布。', successAutoDismissMs: 2000 })" class="bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow transition">
                     💾 儲存變更
                 </button>
                 
@@ -142,8 +142,10 @@
         </div>
     </div>
 
-    <script src="admin_config.js?v=19"></script>
-    <script src="admin_api.js?v=19"></script>
-    <script src="admin_ui.js?v=19"></script>
+    <div id="admin-toast" class="admin-toast hidden" role="status" aria-live="polite"></div>
+
+    <script src="admin_config.js?v=20"></script>
+    <script src="admin_api.js?v=20"></script>
+    <script src="admin_ui.js?v=20"></script>
 </body>
 </html>

@@ -176,7 +176,7 @@ function processFirebaseData(weddingGuests, unassignedGuests) {
 // 📌 3. 儲存雙節點與欄位架構
 // ==========================================
 function saveAllToFirebase(options = {}) {
-    const { successMessage = null, reloadAfterSave = true } = options;
+    const { successMessage = null, successAutoDismissMs = null, reloadAfterSave = true } = options;
     const rows = tbody.querySelectorAll('tr');
     let newWeddingGuests = {};
     let newUnassignedGuests = [];
@@ -232,7 +232,9 @@ function saveAllToFirebase(options = {}) {
         markAdminClean();
         if (reloadAfterSave) return loadFirebaseData(true);
     }).then(() => {
-        if (successMessage) alert(successMessage);
+        if (!successMessage) return;
+        if (successAutoDismissMs) showAdminToast(successMessage, successAutoDismissMs);
+        else alert(successMessage);
     }).catch(err => {
         alert("❌ 儲存失敗: " + err.message);
         throw err;

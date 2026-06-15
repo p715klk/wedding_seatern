@@ -1,4 +1,24 @@
 // ==========================================
+// 📌 Toast 提示（自動消失）
+// ==========================================
+let adminToastTimer = null;
+
+function showAdminToast(message, durationMs = 2000) {
+    const toast = document.getElementById('admin-toast');
+    if (!toast || !message) return;
+
+    clearTimeout(adminToastTimer);
+    toast.textContent = message;
+    toast.classList.remove('hidden');
+    requestAnimationFrame(() => toast.classList.add('is-visible'));
+
+    adminToastTimer = setTimeout(() => {
+        toast.classList.remove('is-visible');
+        setTimeout(() => toast.classList.add('hidden'), 250);
+    }, durationMs);
+}
+
+// ==========================================
 // 📌 依文字長度估算欄寬
 // ==========================================
 function colWidthByText(text, { min = 40, max = 280, pad = 24, charW = 13 } = {}) {

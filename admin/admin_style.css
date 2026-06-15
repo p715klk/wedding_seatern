@@ -298,3 +298,29 @@ html, body {
         font-size: 16px !important;
     }
 }
+
+.admin-toast {
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(-0.5rem);
+    z-index: 10000;
+    max-width: min(92vw, 28rem);
+    padding: 0.75rem 1.25rem;
+    border-radius: 0.75rem;
+    background: #166534;
+    color: #fff;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    text-align: center;
+    line-height: 1.45;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.admin-toast.is-visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
