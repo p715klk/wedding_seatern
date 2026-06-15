@@ -921,16 +921,17 @@ function getOccupancyColor(filled, maxSeats) {
 }
 
 function buildHubRingSVG(filled, maxSeats) {
-    const r = 58;
+    const r = 114;
+    const stroke = 8;
     const circumference = 2 * Math.PI * r;
     const ratio = Math.min(filled / maxSeats, 1);
     const dash = circumference * ratio;
     const color = getOccupancyColor(filled, maxSeats);
-    const size = 136;
+    const size = 250;
     const cx = size / 2;
     return `<svg class="hub-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="width:calc(${size}px * var(--zoom));height:calc(${size}px * var(--zoom))">
-        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#f3f4f6" stroke-width="6"/>
-        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="6"
+        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="#f3f4f6" stroke-width="${stroke}"/>
+        <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}"
             stroke-dasharray="${dash} ${circumference}" stroke-linecap="round"
             transform="rotate(-90 ${cx} ${cx})"/>
     </svg>`;
@@ -1141,7 +1142,7 @@ function formatGuestDisplayName(name) {
 
 function getSeatLayout(maxSeats) {
     const plateR = PLATE_SIZE / 2;
-    const hubClearR = 74;
+    const hubClearR = 118;
     let guestSize = 64;
     if (maxSeats > 12) guestSize = 58;
     if (maxSeats > 14) guestSize = 54;
@@ -1833,7 +1834,7 @@ function appendTablePlateGuestUI(tablePlate, tableNum, settings) {
     hubCenter.innerHTML = [
         `<span class="hub-title">Table ${tableNum}</span>`,
         tableLabel ? `<span class="hub-category">${escapeHtml(tableLabel)}</span>` : '',
-        `<span class="hub-num">${filled}</span>`
+        `<span class="hub-num">${filled} ppl</span>`
     ].join('');
     if (IS_TOUCH_DEVICE) {
         bindGuestTap(hubCenter, () => openSettingsModal(tableNum, maxSeats));
